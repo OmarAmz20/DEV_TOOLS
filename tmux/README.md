@@ -53,10 +53,3 @@ Scroll with mouse (mouse mode is on).
 
 `Prefix r` — reloads `tmux.conf` in-place.
 
-## Plugins (TPM)
-
-- **tmux-yank** — system clipboard integration (select + `y` in copy mode copies to clipboard)
-- **catppuccin/tmux** — themed status bar
-- **tmux-sensible** — sensible defaults
-
-Install new plugins: add to `.tmux.conf`, then `Prefix I` (capital I) inside tmux.
