@@ -19,7 +19,7 @@ vim.opt.shiftwidth = 2
 vim.opt.tabstop = 2
 vim.opt.termguicolors = true
 vim.g.mapleader = " "
-
+vim.opt.clipboard:append('unnamedplus')   
 require("lazy").setup({
 
   -- Explorer
@@ -41,6 +41,31 @@ require("lazy").setup({
       vim.keymap.set("n", "<leader>ff", builtin.find_files, {})
       vim.keymap.set("n", "<leader>fg", builtin.live_grep, {})
       vim.keymap.set("n", "<leader>fb", builtin.buffers, {})
+      vim.keymap.set("n", "<leader>t", function() vim.cmd(":vsplit topright | term") end, {})
+    end,
+  },
+
+  -- Markdown inline rendering (headings, bold, tables, images, etc.)
+  {
+    "MeanderingProgrammer/render-markdown.nvim",
+    dependencies = {
+      "nvim-treesitter/nvim-treesitter",
+      "nvim-tree/nvim-web-devicons",
+    },
+    opts = {},
+    name = "render-markdown",
+  },
+
+  -- Treesitter (for render-markdown and better syntax highlighting)
+  {
+    "nvim-treesitter/nvim-treesitter",
+    build = ":TSUpdate",
+    config = function()
+      require("nvim-treesitter.config").setup({
+        ensure_installed = { "markdown", "markdown_inline" },
+        auto_install = true,
+        highlight = { enable = true },
+      })
     end,
   },
 
@@ -75,4 +100,13 @@ require("lazy").setup({
   end,
 },
 })
-vim.cmd("colorscheme tokyonight-night")
+
+-- Open PDFs with zathura (or xdg-open as fallback)
+local pdf_viewer = vim.fn.executable("zathura") == 1 and "zathura" or "xdg-open"
+vim.api.nvim_create_autocmd("BufReadCmd", {
+  pattern = { "*.pdf" },
+  callback = function()
+    vim.fn.jobstart({ pdf_viewer, vim.fn.expand("%:p") }, { detach = true })
+    vim.cmd("bw")
+  end,
+})
