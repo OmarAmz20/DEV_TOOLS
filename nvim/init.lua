@@ -11,6 +11,13 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
+-- Make tools installed with uv/pipx available to Neovim (e.g. flake8),
+-- even when Neovim is launched from the desktop instead of a shell.
+local user_bin = vim.fn.expand("~/.local/bin")
+if vim.fn.isdirectory(user_bin) == 1 and not (vim.env.PATH or ""):find(user_bin, 1, true) then
+  vim.env.PATH = user_bin .. ":" .. (vim.env.PATH or "")
+end
+
 -- Basic options
 vim.opt.number = true
 vim.opt.relativenumber = true
@@ -85,7 +92,10 @@ require("lazy").setup({
       "nvim-treesitter/nvim-treesitter",
       "nvim-tree/nvim-web-devicons",
     },
-    opts = {},
+    opts = {
+      -- No LaTeX tooling installed, so skip math rendering.
+      latex = { enabled = false },
+    },
     name = "render-markdown",
   },
 
@@ -96,7 +106,7 @@ require("lazy").setup({
     build = ":TSUpdate",
     config = function()
       require("nvim-treesitter.configs").setup({
-        ensure_installed = { "markdown", "markdown_inline" },
+        ensure_installed = { "markdown", "markdown_inline", "html", "yaml" },
         auto_install = true,
         highlight = { enable = true },
       })
@@ -119,6 +129,9 @@ require("lazy").setup({
       })
     end,
   },
+}, {
+  -- No plugin needs luarocks; don't report it as a health error.
+  rocks = { enabled = false },
 })
 
 -- Black metal theme: pure black, bone white, dusty red.
