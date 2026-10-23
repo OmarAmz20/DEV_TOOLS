@@ -82,24 +82,28 @@ require("lazy").setup({
       })
     end,
   },
-{
-  "folke/tokyonight.nvim",
-  lazy = false,
-  priority = 1000,
-  opts = {
-    style = "night",
-    styles = {
-      comments = { italic = false },
-      keywords = { italic = false },
-    },
-    dim_inactive = true,
-  },
-  config = function(_, opts)
-    require("tokyonight").setup(opts)
-    vim.cmd("colorscheme tokyonight-night")
-  end,
-},
 })
+
+-- Black metal theme: pure black, bone white, dusty red.
+vim.cmd.colorscheme("blackmetal")
+
+-- Keep file icons monochrome so nothing escapes the 3-color palette.
+local ok_devicons, devicons = pcall(require, "nvim-web-devicons")
+if ok_devicons then
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal" })
+  local fg = string.format("#%06x", normal.fg)
+  devicons.setup({
+    color_icons = false,
+    override = {
+      default_icon = { icon = "", color = fg, name = "Default" },
+    },
+  })
+  for name in pairs(vim.api.nvim_get_hl(0, {})) do
+    if name:match("^DevIcon") then
+      vim.api.nvim_set_hl(0, name, { fg = normal.fg, bg = normal.bg })
+    end
+  end
+end
 
 -- Open PDFs with zathura (or xdg-open as fallback)
 local pdf_viewer = vim.fn.executable("zathura") == 1 and "zathura" or "xdg-open"
