@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run Aura Studio from this folder, a checkout, or a symlink in ~/.local/bin.
+set -e
+SELF=$(readlink -f -- "$0" 2>/dev/null || printf '%s\n' "$0")
+ROOT=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m aura_studio "$@"

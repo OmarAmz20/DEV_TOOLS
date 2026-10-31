@@ -1,0 +1,11 @@
+[Icon Theme]
+Name=Aura Studio Local
+Comment=Icons shipped with Aura Studio
+Directories=scalable/apps
+
+[scalable/apps]
+Size=128
+Context=Applications
+Type=Scalable
+MinSize=8
+MaxSize=512
