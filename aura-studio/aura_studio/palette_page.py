@@ -133,6 +133,7 @@ class PalettePage(Gtk.Box):
         self.accent_button = Gtk.ColorDialogButton(
             dialog=Gtk.ColorDialog(with_alpha=False, title="Choose an accent colour"))
         self.accent_button.set_tooltip_text("Use a custom accent instead of the picture's")
+        self._accent_shown = widgets.colour_button_hex(self.accent_button)
         self.accent_button.connect("notify::rgba", self.on_custom_accent)
         accent_row.append(self.accent_button)
         self.reset_accent = Gtk.Button(label="Use image accent")
@@ -304,7 +305,9 @@ class PalettePage(Gtk.Box):
             custom = self.win.config.get("accent")
             fallback = (self.current_palette or self.win.preview_palette or {}).get(
                 self.win.effective_mode(), {}).get("accent", "#888888")
-            widgets.set_colour_button(self.accent_button, custom or fallback)
+            shown = (custom or fallback).upper()
+            self._accent_shown = shown
+            widgets.set_colour_button(self.accent_button, shown)
             if custom:
                 self.accent_hint.set_label(f"Custom accent {custom.upper()} · "
                                            "the image still supplies the background tint.")
@@ -344,6 +347,9 @@ class PalettePage(Gtk.Box):
         if self.updating:
             return
         chosen = widgets.colour_button_hex(button)
+        if chosen == getattr(self, "_accent_shown", None):
+            return
+        self._accent_shown = chosen
         self.win.set_accent(chosen)
 
     def copy_palette(self, *_):

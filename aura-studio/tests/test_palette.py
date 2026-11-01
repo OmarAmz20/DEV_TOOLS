@@ -3,16 +3,30 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import tempfile
 import unittest
+import zlib
 
 from aura_studio import color, palette
 
 
-def write_ppm(path, pixels, width, height):
+def _png_chunk(kind, data):
+    return (struct.pack(">I", len(data)) + kind + data +
+            struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+
+
+def write_png(path, pixels, width, height):
+    rows = []
+    stride = width * 3
+    for y in range(height):
+        rows.append(b"\x00" + bytes(pixels[y * stride:(y + 1) * stride]))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     with open(path, "wb") as handle:
-        handle.write(f"P6\n{width} {height}\n255\n".encode())
-        handle.write(bytes(pixels))
+        handle.write(b"\x89PNG\r\n\x1a\n")
+        handle.write(_png_chunk(b"IHDR", header))
+        handle.write(_png_chunk(b"IDAT", zlib.compress(b"".join(rows), 9)))
+        handle.write(_png_chunk(b"IEND", b""))
 
 
 class ColourTest(unittest.TestCase):
@@ -34,7 +48,7 @@ class PaletteTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.directory = tempfile.TemporaryDirectory(prefix="aura-palette-test-")
-        cls.image = os.path.join(cls.directory.name, "colour.ppm")
+        cls.image = os.path.join(cls.directory.name, "colour.png")
         width = height = 48
         pixels = []
         for y in range(height):
@@ -47,14 +61,14 @@ class PaletteTest(unittest.TestCase):
                     pixels += (25, 150, 80)
                 else:
                     pixels += (205, 40, 95)
-        write_ppm(cls.image, pixels, width, height)
-        cls.mono = os.path.join(cls.directory.name, "mono.ppm")
+        write_png(cls.image, pixels, width, height)
+        cls.mono = os.path.join(cls.directory.name, "mono.png")
         pixels = []
         for y in range(32):
             for x in range(32):
                 value = 35 + (x + y) * 3
                 pixels += (value, value, value)
-        write_ppm(cls.mono, pixels, 32, 32)
+        write_png(cls.mono, pixels, 32, 32)
 
     @classmethod
     def tearDownClass(cls):

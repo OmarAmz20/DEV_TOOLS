@@ -76,41 +76,88 @@ available, and standard GNOME desktop settings for icons/fonts/cursor.
 
 ## Requirements
 
-- Linux with Python 3.10+
-- Python 3 GI bindings for **GTK 4.10+**, **libadwaita 1.6+** and **GdkPixbuf**
-- `ffmpeg` for video thumbnails/frames (optional, but recommended)
-- A wallpaper backend from the table above (optional for the Palette Lab and
-  profiles; required to actually change the wallpaper)
+Aura uses a **Pixi** environment for Python, GTK 4.10+, libadwaita 1.6+ and
+GdkPixbuf, so you do not need to install PyGObject or GTK by hand. Pixi itself
+is installed by `install.sh` when it is missing.
 
-On Debian/Ubuntu:
+- Linux x86_64 (Ubuntu, Debian, Arch, Fedora, …)
+- X11 or Wayland
+- `curl` or `wget` while installing (to bootstrap Pixi)
+- Optional system helpers, installed by `install.sh` when possible:
+  `ffmpeg` for video thumbnails, `dconf` for GNOME Terminal colours, and `feh`
+  for wallpaper on non-GNOME X11 desktops.
+
+No root is needed for the app or the Pixi environment. Optional system helpers
+may ask for `sudo`.
+
+If you prefer not to use Pixi, `./install.sh --system` uses your distro's
+Python + GTK packages instead:
 
 ```sh
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 ffmpeg
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+    gir1.2-gdkpixbuf-2.0 ffmpeg dconf-cli feh   # Ubuntu/Debian
 ```
 
-## Run it
-
-From this folder, with no installation:
+## Install and run
 
 ```sh
-./aura-studio
-```
-
-Or install a launcher for the current user (no sudo, creates nothing in system
-directories):
-
-```sh
+cd ~/Downloads/aura-studio
 ./install.sh
 ```
 
-Then open **Aura Studio** from your app launcher or run:
+`install.sh` does four things:
+
+1. Installs **Pixi** into `~/.local/bin` if it is not already available.
+2. Creates the app environment from `pixi.toml` + `pixi.lock`
+   (`pixi install`). The first run downloads GTK and libadwaita (about 500 MB).
+3. Adds the `aura-studio` launcher and desktop entry to your user profile.
+4. Installs optional helpers such as `ffmpeg`, `dconf-cli` and `feh` with your
+   distro's package manager when they are missing.
+
+Then open **Aura Studio** from your app launcher, or run:
 
 ```sh
 aura-studio
 ```
 
-The launcher can be removed with `./uninstall.sh`. Your pictures and profiles
-stay in place.
+If your current shell has not picked up `~/.local/bin` yet, log in again or use
+`~/.local/bin/aura-studio`.
+
+You can also run it straight from the project without the launcher:
+
+```sh
+./aura-studio
+pixi run run
+```
+
+The launcher can be removed with `./uninstall.sh`; add `--purge` to delete the
+local Pixi environment as well. Your pictures and profiles stay in place.
+
+### Ubuntu and X11
+
+Aura runs natively on Ubuntu X11:
+
+- **Ubuntu GNOME on Xorg** changes the wallpaper through `gsettings`, which
+  persists across login and works with the lock screen.
+- **Other X11 desktops** use `feh`; the installer adds `feh` when needed and
+  adds a small login autostart entry so the last wallpaper comes back after a
+  logout/reboot (feh cannot remember it by itself). The primary supported X11
+  setup is Ubuntu GNOME; on XFCE/KDE the desktop's own wallpaper service may
+  take over, while colours, profiles and terminal settings still work.
+- **Light/dark colours, icons, fonts and cursor** use standard GNOME settings.
+- **Transparent windows** need a compositor. GNOME's Mutter already provides
+  one; on other X11 desktops install `picom` and run `picom --daemon`.
+- The Pixi activation script (`scripts/activate.sh`) connects the Pixi GLib
+  stack to your real dconf settings, so “Apply this look” changes your actual
+  desktop rather than the isolated environment.
+
+If you ever suspect the Pixi environment is the problem, compare with:
+
+```sh
+AURA_USE_SYSTEM=1 ./aura-studio
+```
+
+Then report which one behaves differently.
 
 ## Quick start
 
@@ -137,6 +184,7 @@ aura-studio palette FILE             print the palette extracted from a picture
 aura-studio palette FILE --json      print it as JSON (also --css)
 aura-studio profiles                 list saved profiles
 aura-studio apply-profile NAME       apply a saved profile by name or id
+aura-studio reapply-wallpaper        restore the last wallpaper (X11 login helper)
 aura-studio restore                  undo everything Aura changed
 aura-studio status                   show backend, session, mode and wallpaper
 ```
@@ -155,6 +203,9 @@ aura-studio status                   show backend, session, mode and wallpaper
 | `~/.cache/aura-studio/thumbs/` | cached thumbnails |
 | `~/.cache/aura-studio/frames/` | frames extracted from videos |
 | `~/.local/share/themes/Aura A`, `Aura B` | the two identical generated themes used to make GTK reload live |
+| `.pixi/envs/default/` | the self-contained Pixi runtime (Python, GTK, libadwaita) |
+| `pixi.toml`, `pixi.lock` | reproducible Pixi environment definition |
+| `scripts/activate.sh` | connects Pixi GLib to the real dconf settings backend |
 
 Set `AURA_CONFIG_DIR` and `AURA_CACHE_DIR` to use different locations (useful
 for tests).
@@ -193,15 +244,32 @@ printf 'background %s\nforeground %s\n' "$AURA_PAPER" "$AURA_INK" > ~/.config/ki
 - `aura_studio/library_page.py`, `palette_page.py`, `look_page.py`,
   `profiles_page.py` — the four screens.
 - `aura_studio/app.py` — the application window, actions and timers.
+- `pixi.toml`, `pixi.lock`, `scripts/activate.sh` — the self-contained runtime
+  and the bridge to the host's real dconf/GSettings database.
 
 ## Tests
+
+```sh
+pixi run test
+```
+
+Or, with the system Python:
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
 The system test uses a throwaway HOME and an in-memory GSettings backend, so it
-never touches your real desktop.
+never touches your real desktop. There is also an X11 smoke test you can run
+yourself on an Xorg session:
+
+```sh
+pixi run x11
+# or: GDK_BACKEND=x11 ./aura-studio
+```
+
+It should behave exactly like the Wayland run; only the wallpaper backend
+changes (GNOME settings or feh).
 
 ## Limits
 

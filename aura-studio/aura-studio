@@ -1,6 +1,36 @@
 #!/bin/sh
 # Run Aura Studio from this folder, a checkout, or a symlink in ~/.local/bin.
+# Prefer the Pixi environment created by install.sh; fall back to system Python.
 set -e
 SELF=$(readlink -f -- "$0" 2>/dev/null || printf '%s\n' "$0")
 ROOT=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
-PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m aura_studio "$@"
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+
+MODE=pixi
+if [ -f "$ROOT/.aura-install-mode" ]; then
+    MODE=$(cat "$ROOT/.aura-install-mode" 2>/dev/null || printf 'pixi')
+fi
+if [ "${AURA_USE_SYSTEM:-0}" = "1" ]; then
+    MODE=system
+fi
+
+if [ "$MODE" != "system" ]; then
+    for pixi in "$(command -v pixi 2>/dev/null || true)" \
+                "$HOME/.local/bin/pixi" \
+                "$HOME/.pixi/bin/pixi"; do
+        [ -n "$pixi" ] && [ -x "$pixi" ] || continue
+        if [ ! -d "$ROOT/.pixi/envs/default" ]; then
+            echo "Aura Studio: preparing the Pixi environment (first run)…" >&2
+            if ! "$pixi" install --frozen --manifest-path "$ROOT/pixi.toml" >/dev/null 2>&1; then
+                "$pixi" install --manifest-path "$ROOT/pixi.toml" || true
+            fi
+        fi
+        if [ -d "$ROOT/.pixi/envs/default" ]; then
+            exec "$pixi" run --frozen --manifest-path "$ROOT/pixi.toml" \
+                python -m aura_studio "$@"
+        fi
+    done
+fi
+
+exec python3 -m aura_studio "$@"

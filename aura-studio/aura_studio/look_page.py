@@ -117,6 +117,7 @@ class LookPage(Gtk.Box):
         suffix = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER)
         self.accent_button = Gtk.ColorDialogButton(
             dialog=Gtk.ColorDialog(with_alpha=False, title="Choose an accent colour"))
+        self._accent_shown = widgets.colour_button_hex(self.accent_button)
         self.accent_button.connect("notify::rgba", self.on_accent)
         suffix.append(self.accent_button)
         self.accent_reset = Gtk.Button(label="Use image", css_classes=["flat"])
@@ -306,7 +307,11 @@ class LookPage(Gtk.Box):
     def on_accent(self, button, _param):
         if self.updating:
             return
-        self.win.set_accent(widgets.colour_button_hex(button))
+        chosen = widgets.colour_button_hex(button)
+        if chosen == getattr(self, "_accent_shown", None):
+            return
+        self._accent_shown = chosen
+        self.win.set_accent(chosen)
 
     def on_switch(self, row, _param, key):
         if self.updating:
@@ -375,6 +380,7 @@ class LookPage(Gtk.Box):
 
             preferences = system.current_preferences()
             accent = config.get("accent") or self.win.accent_from_preview() or "#888888"
+            self._accent_shown = accent.upper()
             widgets.set_colour_button(self.accent_button, accent)
             self.accent_reset.set_sensitive(bool(config.get("accent")))
             if config.get("accent"):

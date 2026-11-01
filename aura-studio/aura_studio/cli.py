@@ -17,6 +17,7 @@ Usage:
   aura-studio palette FILE --json print it as JSON (also: --css)
   aura-studio profiles            list saved profiles
   aura-studio apply-profile NAME  apply a saved profile (name or id)
+  aura-studio reapply-wallpaper   restore the last wallpaper (used at X11 login)
   aura-studio restore             undo everything Aura changed
   aura-studio status              show backend, mode and current wallpaper
 
@@ -123,6 +124,15 @@ def main(argv=None):
                 raise ValueError("no profile matches that name")
             result = core.apply_profile(profiles[0])
             print(f"Applied {profiles[0].get('name')} · {result['mode']}")
+            return 0
+        if command == "reapply-wallpaper":
+            from . import core, library, store
+            state = store.load_state()
+            path = state.get("wallpaper")
+            if not path or not os.path.isfile(path) or not library.is_wallpaper(path):
+                return 0
+            result = core.apply_wallpaper(path, store.load_config(), match_colors=False)
+            print(f"Wallpaper restored via {result['result']['backend']}")
             return 0
         if command == "restore":
             from . import core

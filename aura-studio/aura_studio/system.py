@@ -198,9 +198,11 @@ def backend_label():
 
 def session_label():
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").strip()
+    kind = "Wayland" if _wayland() else ("X11" if os.environ.get("DISPLAY") else "")
     if desktop:
-        return desktop.split(":")[0]
-    return "Wayland" if _wayland() else "X11"
+        name = desktop.split(":")[0]
+        return f"{name} ({kind})" if kind else name
+    return kind or "unknown session"
 
 
 def _dms_current_wallpapers():
@@ -794,6 +796,7 @@ def status():
     return {
         "backend": backend_label(),
         "session": session_label(),
+        "session_type": "wayland" if _wayland() else "x11",
         "wallpaper": state.get("wallpaper"),
         "applied_mode": state.get("mode"),
         "configured_mode": config["mode"],
