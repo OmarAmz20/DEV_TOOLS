@@ -215,3 +215,17 @@ def shuffle(paths, current=None):
     current = os.path.realpath(current) if current else None
     choices = [p for p in paths if os.path.realpath(p) != current]
     return random.choice(choices) if choices else None
+
+
+def next_path(paths, current=None, order="shuffle"):
+    """The next wallpaper in *order*: shuffle, or walk the sorted folder."""
+    if order != "sequential":
+        return shuffle(paths, current)
+    ordered = sorted((path for path in paths if path), key=lambda p: p.lower())
+    if not ordered:
+        return None
+    current = os.path.realpath(current) if current else None
+    for index, path in enumerate(ordered):
+        if os.path.realpath(path) == current:
+            return ordered[(index + 1) % len(ordered)]
+    return ordered[0]

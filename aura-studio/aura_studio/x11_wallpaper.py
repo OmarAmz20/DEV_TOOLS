@@ -14,7 +14,7 @@ every workspace.
 
 Run it with a system Python that has PyGObject + GTK 3, for example:
 
-    /usr/bin/python3 aura_studio/x11_wallpaper.py /path/to/picture.jpg
+    /usr/bin/python3 aura_studio/x11_wallpaper.py /path/to/picture.jpg fill
 """
 from __future__ import annotations
 
@@ -35,9 +35,11 @@ from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
 
 class WallpaperWindow:
-    def __init__(self, path):
+    def __init__(self, path, mode="fill"):
         self.path = os.path.realpath(path)
         self.pixbuf = GdkPixbuf.Pixbuf.new_from_file(self.path)
+        self.mode = mode if mode in (
+            "fill", "fit", "stretch", "center", "tile", "span") else "fill"
         self.scaled = None
         self.scaled_size = (0, 0)
         self._x11 = None
@@ -117,11 +119,82 @@ class WallpaperWindow:
         self.scaled_size = (width, height)
         return self.scaled
 
+    def _fit(self, width, height):
+        if width <= 0 or height <= 0:
+            return None
+        if self.scaled is not None and self.scaled_size == (width, height):
+            return self.scaled
+        source_width, source_height = self.pixbuf.get_width(), self.pixbuf.get_height()
+        if source_width <= 0 or source_height <= 0:
+            return None
+        scale = min(width / source_width, height / source_height)
+        target_width = max(1, int(round(source_width * scale)))
+        target_height = max(1, int(round(source_height * scale)))
+        self.scaled = self.pixbuf.scale_simple(
+            target_width, target_height, GdkPixbuf.InterpType.BILINEAR)
+        self.scaled_size = (width, height)
+        return self.scaled
+
+    def _stretch(self, width, height):
+        if width <= 0 or height <= 0:
+            return None
+        if self.scaled is not None and self.scaled_size == (width, height):
+            return self.scaled
+        self.scaled = self.pixbuf.scale_simple(
+            width, height, GdkPixbuf.InterpType.BILINEAR)
+        self.scaled_size = (width, height)
+        return self.scaled
+
+    def _tile(self, cr, width, height):
+        pixbuf = self.pixbuf
+        tile_width, tile_height = pixbuf.get_width(), pixbuf.get_height()
+        if tile_width <= 0 or tile_height <= 0:
+            return
+        if tile_width < 64 or tile_height < 64:
+            scale = max(64 / tile_width, 64 / tile_height)
+            target_width = max(1, int(round(tile_width * scale)))
+            target_height = max(1, int(round(tile_height * scale)))
+            scaled = pixbuf.scale_simple(
+                target_width, target_height, GdkPixbuf.InterpType.BILINEAR)
+            if scaled is not None:
+                pixbuf = scaled
+                tile_width, tile_height = target_width, target_height
+        for y in range(0, height, tile_height):
+            for x in range(0, width, tile_width):
+                Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y)
+                cr.paint()
+
     def _draw(self, widget, cr):
         width, height = widget.get_allocated_width(), widget.get_allocated_height()
         cr.set_source_rgb(0, 0, 0)
         cr.paint()
-        scaled = self._cover(width, height)
+        mode = "fill" if self.mode == "span" else self.mode
+        if mode == "tile":
+            cr.save()
+            cr.rectangle(0, 0, width, height)
+            cr.clip()
+            self._tile(cr, width, height)
+            cr.restore()
+            return False
+        if mode == "center":
+            pixbuf = self.pixbuf
+            x = (width - pixbuf.get_width()) // 2
+            y = (height - pixbuf.get_height()) // 2
+            Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y)
+            cr.paint()
+            return False
+        if mode == "fit":
+            scaled = self._fit(width, height)
+            if scaled is not None:
+                Gdk.cairo_set_source_pixbuf(
+                    cr, scaled, (width - scaled.get_width()) // 2,
+                    (height - scaled.get_height()) // 2)
+                cr.paint()
+            return False
+        if mode == "stretch":
+            scaled = self._stretch(width, height)
+        else:
+            scaled = self._cover(width, height)
         if scaled is not None:
             Gdk.cairo_set_source_pixbuf(cr, scaled, 0, 0)
             cr.paint()
@@ -151,14 +224,19 @@ class WallpaperWindow:
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if len(argv) != 1:
-        print("usage: x11_wallpaper.py PICTURE", file=sys.stderr)
+    if len(argv) not in (1, 2):
+        print("usage: x11_wallpaper.py PICTURE [fill|fit|stretch|center|tile|span]",
+              file=sys.stderr)
         return 2
     if not os.path.isfile(argv[0]):
         print(f"not a file: {argv[0]}", file=sys.stderr)
         return 2
+    mode = argv[1] if len(argv) > 1 else "fill"
+    if mode not in ("fill", "fit", "stretch", "center", "tile", "span"):
+        print(f"unknown wallpaper mode: {mode}", file=sys.stderr)
+        return 2
     try:
-        WallpaperWindow(argv[0])
+        WallpaperWindow(argv[0], mode)
     except Exception as error:
         print(f"could not start the wallpaper window: {error}", file=sys.stderr)
         return 1

@@ -20,10 +20,39 @@ def _xdg(env, fallback):
     return os.environ.get(env) or fallback
 
 
+def _goinfre_root():
+    """The 42-school goinfre mount, when this machine has one.
+
+    goinfre is big and survives between sessions on campus machines, while the
+    home directory has a small quota.  Set AURA_GOINFRE to override it.
+    """
+    candidates = []
+    if os.environ.get("AURA_GOINFRE"):
+        candidates.append(os.environ["AURA_GOINFRE"])
+    candidates.append(os.path.join(HOME, "goinfre"))
+    for candidate in candidates:
+        if candidate and os.path.isdir(candidate) and os.access(candidate, os.W_OK):
+            return os.path.realpath(candidate)
+    return None
+
+
+GOINFRE = _goinfre_root()
+GOINFRE_ROOT = os.path.join(GOINFRE, "aura-studio") if GOINFRE else None
+
+
+def _cache_dir():
+    override = os.environ.get("AURA_CACHE_DIR")
+    if override:
+        return override
+    if GOINFRE_ROOT:
+        return os.path.join(GOINFRE_ROOT, "cache")
+    return os.path.join(_xdg("XDG_CACHE_HOME", os.path.join(HOME, ".cache")),
+                        "aura-studio")
+
+
 CONFIG_DIR = os.environ.get("AURA_CONFIG_DIR") or os.path.join(
     _xdg("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "aura-studio")
-CACHE_DIR = os.environ.get("AURA_CACHE_DIR") or os.path.join(
-    _xdg("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "aura-studio")
+CACHE_DIR = _cache_dir()
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
 ORIGINALS = os.path.join(CONFIG_DIR, "originals.json")
@@ -49,6 +78,21 @@ def _default_folder():
     return HOME
 
 
+WALLPAPER_MODES = ("fill", "fit", "stretch", "center", "tile", "span")
+WALLPAPER_MODE_LABELS = {
+    "fill": "Fill the screen",
+    "fit": "Fit inside the screen",
+    "stretch": "Stretch to the screen",
+    "center": "Centre at original size",
+    "tile": "Tile",
+    "span": "Span across monitors",
+}
+SLIDESHOW_ORDERS = ("shuffle", "sequential")
+SLIDESHOW_ORDER_LABELS = {
+    "shuffle": "Shuffle",
+    "sequential": "In order",
+}
+
 DEFAULT_CONFIG = {
     "folder": _default_folder(),
     "mode": "auto",                 # light | dark | auto
@@ -57,23 +101,27 @@ DEFAULT_CONFIG = {
     "style": "balanced",            # vivid | balanced | muted | mono
     "accent": None,                 # custom #RRGGBB, or None for the picture's accent
     "match_colors": True,           # recolour when a wallpaper is applied
+    "wallpaper_mode": "fill",       # fill | fit | stretch | center | tile | span
     "slide_minutes": 0,             # 0 = no slideshow
+    "slideshow_order": "shuffle",   # shuffle | sequential
     "glass": False,
     "recolour_gtk": True,
     "terminal": True,
     "lock_screen": False,
     "icon_theme": None,             # None = leave the system value alone
     "cursor_theme": None,
+    "cursor_size": None,            # None = leave the system value alone
     "font": None,
     "mono_font": None,
     "text_scale": None,
+    "autostart_profile": None,      # profile id, or None for the last applied look
     "favorites": [],
 }
 
 PROFILE_KEYS = (
-    "mode", "light_from", "dark_from", "style", "accent", "glass",
-    "recolour_gtk", "terminal", "lock_screen", "icon_theme", "cursor_theme",
-    "font", "mono_font", "text_scale",
+    "mode", "light_from", "dark_from", "style", "accent", "wallpaper_mode",
+    "glass", "recolour_gtk", "terminal", "lock_screen", "icon_theme",
+    "cursor_theme", "cursor_size", "font", "mono_font", "text_scale",
 )
 
 
@@ -129,9 +177,19 @@ def load_config():
         config["slide_minutes"] = max(0, int(config.get("slide_minutes", 0)))
     except (TypeError, ValueError):
         config["slide_minutes"] = 0
-    for key in ("icon_theme", "cursor_theme", "font", "mono_font"):
+    if config.get("wallpaper_mode") not in WALLPAPER_MODES:
+        config["wallpaper_mode"] = "fill"
+    if config.get("slideshow_order") not in SLIDESHOW_ORDERS:
+        config["slideshow_order"] = "shuffle"
+    for key in ("icon_theme", "cursor_theme", "font", "mono_font",
+                "autostart_profile"):
         if config.get(key) is not None and not isinstance(config.get(key), str):
             config[key] = None
+    if config.get("cursor_size") is not None:
+        try:
+            config["cursor_size"] = max(8, min(128, int(config["cursor_size"])))
+        except (TypeError, ValueError):
+            config["cursor_size"] = None
     if config.get("text_scale") is not None:
         try:
             config["text_scale"] = max(0.5, min(3.0, float(config["text_scale"])))

@@ -13,6 +13,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import uuid
 
@@ -38,18 +39,26 @@ DESKTOP_PID = os.path.join(store.CONFIG_DIR, "desktop-wallpaper.pid")
 DESKTOP_LOG = os.path.join(store.CONFIG_DIR, "desktop-wallpaper.log")
 DESKTOP_HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "x11_wallpaper.py")
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LAUNCHER = os.path.join(APP_ROOT, "aura-studio")
+AUTOSTART_DIR = os.path.join(CONFIG_HOME, "autostart")
+AUTOSTART_FILE = os.path.join(AUTOSTART_DIR, "io.github.AuraStudio.apply.desktop")
+LEGACY_AUTOSTART_FILE = os.path.join(
+    AUTOSTART_DIR, "io.github.AuraStudio.wallpaper.desktop")
 
 TOUCHED = [
     ("org.gnome.desktop.interface", "gtk-theme"),
     ("org.gnome.desktop.interface", "color-scheme"),
     ("org.gnome.desktop.interface", "icon-theme"),
     ("org.gnome.desktop.interface", "cursor-theme"),
+    ("org.gnome.desktop.interface", "cursor-size"),
     ("org.gnome.desktop.interface", "font-name"),
     ("org.gnome.desktop.interface", "document-font-name"),
     ("org.gnome.desktop.interface", "monospace-font-name"),
     ("org.gnome.desktop.interface", "text-scaling-factor"),
     ("org.gnome.desktop.background", "picture-uri"),
     ("org.gnome.desktop.background", "picture-uri-dark"),
+    ("org.gnome.desktop.background", "picture-options"),
     ("org.gnome.desktop.background", "primary-color"),
     ("org.gnome.desktop.screensaver", "picture-uri"),
 ]
@@ -102,6 +111,16 @@ def _get_double(schema, key, default=1.0):
         return default
 
 
+def _get_int(schema, key, default=0):
+    settings = _schema(schema)
+    if settings is None or not _has_key(settings, key):
+        return default
+    try:
+        return settings.get_int(key)
+    except Exception:
+        return default
+
+
 def _set_variant(schema, key, value: GLib.Variant):
     settings = _schema(schema)
     if settings is None or not _has_key(settings, key) or not settings.is_writable(key):
@@ -119,6 +138,10 @@ def _set_string(schema, key, value):
 
 def _set_double(schema, key, value):
     return _set_variant(schema, key, GLib.Variant("d", float(value)))
+
+
+def _set_int(schema, key, value):
+    return _set_variant(schema, key, GLib.Variant("i", int(value)))
 
 
 def _sync():
@@ -267,7 +290,7 @@ def _desktop_environment():
     return env
 
 
-def _start_desktop_window(path):
+def _start_desktop_window(path, mode="fill"):
     python = _desktop_python()
     if not python:
         raise RuntimeError("no system Python with GTK 3 for the desktop window")
@@ -275,7 +298,7 @@ def _start_desktop_window(path):
     os.makedirs(store.CONFIG_DIR, exist_ok=True)
     with open(DESKTOP_LOG, "wb") as log:
         process = subprocess.Popen(
-            [python, DESKTOP_HELPER, path],
+            [python, DESKTOP_HELPER, path, mode],
             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             env=_desktop_environment(),
             start_new_session=True, close_fds=True)
@@ -363,11 +386,50 @@ def _dms_current_wallpapers():
     return wallpapers
 
 
-def apply_wallpaper(path):
+FEH_MODE_FLAGS = {
+    "fill": "--bg-fill",
+    "fit": "--bg-max",
+    "stretch": "--bg-scale",
+    "center": "--bg-center",
+    "tile": "--bg-tile",
+    "span": "--bg-max",
+}
+SWAYBG_MODES = {
+    "fill": "fill",
+    "fit": "fit",
+    "stretch": "stretch",
+    "center": "center",
+    "tile": "tile",
+    "span": "fit",
+}
+GNOME_PICTURE_OPTIONS = {
+    "fill": "zoom",
+    "fit": "scaled",
+    "stretch": "stretched",
+    "center": "centered",
+    "tile": "wallpaper",
+    "span": "spanned",
+}
+AWWW_RESIZE_MODES = {
+    "fill": "crop",
+    "fit": "fit",
+    "stretch": "fit",
+    "center": "no",
+    "tile": "no",
+    "span": "fit",
+}
+
+
+def _wallpaper_mode(mode):
+    return mode if mode in store.WALLPAPER_MODES else "fill"
+
+
+def apply_wallpaper(path, mode="fill"):
     """Put *path* on the desktop.  Returns details for state.json."""
     path = os.path.realpath(path)
     if not os.path.isfile(path) or not library.is_wallpaper(path):
         raise ValueError(f"not a picture or video: {path}")
+    mode = _wallpaper_mode(mode)
     applied = path
     from_video = False
     if library.is_video(path):
@@ -398,7 +460,9 @@ def apply_wallpaper(path):
                 raise RuntimeError(output or "DankMaterialShell refused the wallpaper")
     elif name == "awww":
         _ensure_awww()
-        result = _run(["awww", "img", applied, "--transition-type", "wipe",
+        result = _run(["awww", "img", applied,
+                       "--resize", AWWW_RESIZE_MODES[mode],
+                       "--transition-type", "wipe",
                        "--transition-duration", "0.6"], timeout=20)
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout).strip() or "awww failed")
@@ -410,23 +474,25 @@ def apply_wallpaper(path):
     elif name == "swaybg":
         _stop_swaybg()
         process = subprocess.Popen(
-            [shutil.which("swaybg"), "-m", "fill", "-i", applied],
+            [shutil.which("swaybg"), "-m", SWAYBG_MODES[mode], "-i", applied],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, start_new_session=True)
         os.makedirs(store.CONFIG_DIR, exist_ok=True)
         with open(SWAYBG_PID, "w", encoding="utf-8") as handle:
             handle.write(str(process.pid))
     elif name == "feh":
-        result = _run(["feh", "--no-fehbg", "--bg-fill", applied], timeout=15)
+        result = _run(["feh", "--no-fehbg", FEH_MODE_FLAGS[mode], applied], timeout=15)
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout).strip() or "feh failed")
     elif name == "desktop":
-        _start_desktop_window(applied)
+        _start_desktop_window(applied, mode)
     elif name == "gnome":
         uri = Gio.File.new_for_path(applied).get_uri()
         if not _set_string("org.gnome.desktop.background", "picture-uri", uri):
             raise RuntimeError("GNOME's wallpaper setting is locked")
         _set_string("org.gnome.desktop.background", "picture-uri-dark", uri)
+        _set_string("org.gnome.desktop.background", "picture-options",
+                    GNOME_PICTURE_OPTIONS[mode])
         _sync()
     else:
         raise RuntimeError("no wallpaper backend found (install awww, hyprpaper, "
@@ -436,6 +502,7 @@ def apply_wallpaper(path):
         "path": applied,
         "source": path,
         "backend": name,
+        "mode": mode,
         "from_video": from_video,
     }
 
@@ -472,6 +539,7 @@ def current_preferences():
     return {
         "icon_theme": _get_string("org.gnome.desktop.interface", "icon-theme"),
         "cursor_theme": _get_string("org.gnome.desktop.interface", "cursor-theme"),
+        "cursor_size": _get_int("org.gnome.desktop.interface", "cursor-size", 24),
         "font": _get_string("org.gnome.desktop.interface", "font-name"),
         "mono_font": _get_string("org.gnome.desktop.interface", "monospace-font-name"),
         "text_scale": _get_double("org.gnome.desktop.interface", "text-scaling-factor", 1.0),
@@ -558,6 +626,69 @@ def lock_screen_available():
         return False
     settings = _schema("org.gnome.desktop.screensaver")
     return bool(settings is not None and settings.is_writable("picture-uri"))
+
+
+# --- login autostart --------------------------------------------------------------
+
+def _exec_quote(value):
+    """Quote one Exec= argument the way desktop-entry files expect."""
+    value = str(value)
+    if not any(character in value for character in ' \t"\\'):
+        return value
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _launcher_argv():
+    if os.path.isfile(LAUNCHER):
+        return [LAUNCHER]
+    return [sys.executable, "-m", "aura_studio"]
+
+
+def autostart_command(profile=None, delay=8, log=True):
+    argv = [*_launcher_argv(), "apply-saved"]
+    if profile:
+        argv += ["--profile", str(profile)]
+    if delay:
+        argv += ["--delay", str(int(delay))]
+    if log:
+        argv.append("--log")
+    argv.append("--quiet")
+    return " ".join(_exec_quote(argument) for argument in argv)
+
+
+def autostart_entry(profile=None, delay=8):
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=Aura Studio look\n"
+        "Comment=Reapply your saved Aura Studio look after login\n"
+        f"Exec={autostart_command(profile, delay)}\n"
+        "Icon=io.github.AuraStudio\n"
+        "Terminal=false\n"
+        "NoDisplay=true\n"
+        "StartupNotify=false\n"
+        "X-GNOME-Autostart-enabled=true\n"
+        "X-GNOME-Autostart-Phase=Applications\n"
+    )
+
+
+def autostart_enabled():
+    return os.path.isfile(AUTOSTART_FILE)
+
+
+def set_autostart(enabled, profile=None, delay=8):
+    """Install or remove the login entry that reapplies the saved look."""
+    if not enabled:
+        for path in (AUTOSTART_FILE, LEGACY_AUTOSTART_FILE):
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(path)
+        return False
+    os.makedirs(AUTOSTART_DIR, exist_ok=True)
+    store.write_text(AUTOSTART_FILE, autostart_entry(profile, delay))
+    os.chmod(AUTOSTART_FILE, 0o644)
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(LEGACY_AUTOSTART_FILE)
+    return True
 
 
 # --- originals / restore ----------------------------------------------------------
@@ -744,6 +875,8 @@ def _apply_desktop_options(options):
         _set_string("org.gnome.desktop.interface", "icon-theme", options["icon_theme"])
     if options.get("cursor_theme"):
         _set_string("org.gnome.desktop.interface", "cursor-theme", options["cursor_theme"])
+    if options.get("cursor_size"):
+        _set_int("org.gnome.desktop.interface", "cursor-size", options["cursor_size"])
     if options.get("font"):
         _set_string("org.gnome.desktop.interface", "font-name", options["font"])
         _set_string("org.gnome.desktop.interface", "document-font-name", options["font"])
@@ -944,7 +1077,14 @@ def status():
         "configured_mode": config["mode"],
         "style": config["style"],
         "folder": config["folder"],
+        "wallpaper_mode": config.get("wallpaper_mode", "fill"),
+        "slideshow_order": config.get("slideshow_order", "shuffle"),
         "themes": OUR_THEMES,
         "terminal": terminal_targets(),
         "lock_screen": lock_screen_available(),
+        "autostart": autostart_enabled(),
+        "autostart_profile": config.get("autostart_profile"),
+        "config_dir": store.CONFIG_DIR,
+        "cache_dir": store.CACHE_DIR,
+        "goinfre": store.GOINFRE,
     }

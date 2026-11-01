@@ -10,7 +10,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gtk, Pango  # noqa: E402
 
-from . import palette, system, widgets  # noqa: E402
+from . import palette, store, system, widgets  # noqa: E402
 
 SORT_STYLES = list(palette.STYLES)
 SLIDE_CHOICES = [
@@ -48,7 +48,8 @@ class LookPage(Gtk.Box):
         self.build_appearance()
         self.build_targets()
         self.build_desktop()
-        self.build_slideshow()
+        self.build_wallpaper()
+        self.build_session()
         self.build_apply()
         self.sync_from_config()
 
@@ -170,6 +171,17 @@ class LookPage(Gtk.Box):
         self.cursors_combo, self.cursor_values = self._theme_combo(
             group, "Cursor theme", system.cursor_themes(), preferences["cursor_theme"], "cursor_theme")
 
+        self.cursor_size_values = [None, 24, 32, 48, 64]
+        cursor_labels = ["System default", "24 px", "32 px", "48 px", "64 px"]
+        current_size = self.win.config.get("cursor_size")
+        if current_size is not None and current_size not in self.cursor_size_values:
+            self.cursor_size_values.append(current_size)
+            cursor_labels.append(f"{current_size} px")
+        self.cursor_size_row = Adw.ComboRow(
+            title="Cursor size", model=Gtk.StringList.new(cursor_labels))
+        self.cursor_size_row.connect("notify::selected", self.on_cursor_size)
+        group.add(self.cursor_size_row)
+
         self.font_row, self.font_button = self._font_row(
             group, "Interface font", "font", preferences["font"])
         self.mono_row, self.mono_button = self._font_row(
@@ -227,24 +239,63 @@ class LookPage(Gtk.Box):
         group.add(row)
         return row, button
 
-    def build_slideshow(self):
+    def build_wallpaper(self):
         group = Adw.PreferencesGroup(
-            title="Slideshow",
-            description="Runs while Aura is open. A new wallpaper is picked from your folder.")
+            title="Wallpaper",
+            description="How pictures sit on the screen, and how they change over time.")
+        self.wallpaper_mode_values = list(store.WALLPAPER_MODES)
+        self.wallpaper_mode_row = Adw.ComboRow(
+            title="Scaling",
+            subtitle="Used the next time you set a wallpaper.",
+            model=Gtk.StringList.new([store.WALLPAPER_MODE_LABELS[mode]
+                                      for mode in self.wallpaper_mode_values]))
+        self.wallpaper_mode_row.connect("notify::selected", self.on_wallpaper_mode)
+        group.add(self.wallpaper_mode_row)
+
         self.slide_row = Adw.ComboRow(
             title="Change wallpaper",
+            subtitle="Runs while Aura is open and picks from your folder.",
             model=Gtk.StringList.new([label for _minutes, label in SLIDE_CHOICES]))
         self.slide_row.connect("notify::selected", self.on_slide_choice)
         group.add(self.slide_row)
 
-        shuffle_row = Adw.ActionRow(title="Shuffle now",
-                                    subtitle="Pick a random wallpaper and apply it immediately.")
-        shuffle = Gtk.Button(label="Shuffle", valign=Gtk.Align.CENTER)
+        self.slideshow_order_values = list(store.SLIDESHOW_ORDERS)
+        self.slideshow_order_row = Adw.ComboRow(
+            title="Slideshow order",
+            subtitle="Shuffle picks random pictures; in order walks the sorted folder.",
+            model=Gtk.StringList.new([store.SLIDESHOW_ORDER_LABELS[order]
+                                      for order in self.slideshow_order_values]))
+        self.slideshow_order_row.connect("notify::selected", self.on_slideshow_order)
+        group.add(self.slideshow_order_row)
+
+        shuffle_row = Adw.ActionRow(title="Pick one now",
+                                    subtitle="Apply a different wallpaper immediately.")
+        shuffle = Gtk.Button(label="Next wallpaper", valign=Gtk.Align.CENTER)
         shuffle.add_css_class("flat")
         shuffle.connect("clicked", lambda _b: self.win.shuffle_now())
         shuffle_row.add_suffix(shuffle)
         shuffle_row.set_activatable_widget(shuffle)
         group.add(shuffle_row)
+        self.page.append(group)
+
+    def build_session(self):
+        group = Adw.PreferencesGroup(
+            title="At login",
+            description="Some desktops forget themes, icons and fonts when you log out.")
+        self.login_switch = Adw.SwitchRow(
+            title="Reapply my look after login",
+            subtitle="Runs in the background, applies the chosen look and exits. "
+                     "No window is opened.")
+        self.login_switch.connect("notify::active", self.on_login_switch)
+        group.add(self.login_switch)
+
+        self.login_look_values = [None]
+        self.login_look_labels = ["Last applied look"]
+        self.login_look_row = Adw.ComboRow(
+            title="Look to reapply",
+            subtitle="The last applied look, or a saved profile.")
+        self.login_look_row.connect("notify::selected", self.on_login_look)
+        group.add(self.login_look_row)
         self.page.append(group)
 
     def build_apply(self):
@@ -326,6 +377,69 @@ class LookPage(Gtk.Box):
         self.win.save_config(**{key: value})
         self.refresh_status()
 
+    def on_cursor_size(self, combo, _param):
+        if self.updating:
+            return
+        index = combo.get_selected()
+        value = (self.cursor_size_values[index]
+                 if 0 <= index < len(self.cursor_size_values) else None)
+        self.win.save_config(cursor_size=value)
+
+    def on_wallpaper_mode(self, combo, _param):
+        if self.updating:
+            return
+        index = combo.get_selected()
+        if 0 <= index < len(self.wallpaper_mode_values):
+            self.win.save_config(wallpaper_mode=self.wallpaper_mode_values[index])
+
+    def on_slideshow_order(self, combo, _param):
+        if self.updating:
+            return
+        index = combo.get_selected()
+        if 0 <= index < len(self.slideshow_order_values):
+            self.win.save_config(slideshow_order=self.slideshow_order_values[index])
+
+    def on_login_switch(self, row, _param):
+        if self.updating:
+            return
+        enabled = row.get_active()
+        try:
+            system.set_autostart(enabled, profile=self.win.config.get("autostart_profile"))
+        except OSError as error:
+            self.updating = True
+            try:
+                row.set_active(not enabled)
+            finally:
+                self.updating = False
+            self.win.toast(f"Could not update the login entry: {error}")
+            return
+        if enabled and not (self.win.state.get("palette")
+                            or self.win.config.get("autostart_profile")):
+            self.win.toast("Login reapply is on. Apply a look once so there is "
+                           "something to restore.")
+        elif enabled:
+            self.win.toast("Aura will reapply this look in the background after login")
+        else:
+            self.win.toast("Login reapply turned off")
+
+    def on_login_look(self, combo, _param):
+        if self.updating:
+            return
+        value = self.login_look_values[combo.get_selected()] \
+            if 0 <= combo.get_selected() < len(self.login_look_values) else None
+        self.win.save_config(autostart_profile=value)
+        if system.autostart_enabled():
+            try:
+                system.set_autostart(True, profile=value)
+            except OSError as error:
+                self.win.toast(f"Could not update the login entry: {error}")
+                return
+        if value:
+            name = self.login_look_labels[combo.get_selected()]
+            self.win.toast(f"“{name}” will be applied after login")
+        else:
+            self.win.toast("The last applied look will be restored after login")
+
     def on_font(self, button, _param, key, row):
         if self.updating:
             return
@@ -395,9 +509,19 @@ class LookPage(Gtk.Box):
 
             for combo, values, key in (
                     (self.icons_combo, self.icon_values, "icon_theme"),
-                    (self.cursors_combo, self.cursor_values, "cursor_theme")):
+                    (self.cursors_combo, self.cursor_values, "cursor_theme"),
+                    (self.cursor_size_row, self.cursor_size_values, "cursor_size")):
                 value = config.get(key)
                 combo.set_selected(values.index(value) if value in values else 0)
+
+            mode = config.get("wallpaper_mode", "fill")
+            self.wallpaper_mode_row.set_selected(
+                self.wallpaper_mode_values.index(mode)
+                if mode in self.wallpaper_mode_values else 0)
+            order = config.get("slideshow_order", "shuffle")
+            self.slideshow_order_row.set_selected(
+                self.slideshow_order_values.index(order)
+                if order in self.slideshow_order_values else 0)
 
             self.font_button.set_font_desc(Pango.FontDescription.from_string(
                 config.get("font") or preferences["font"] or "Adwaita Sans 11"))
@@ -413,9 +537,24 @@ class LookPage(Gtk.Box):
             minutes = config.get("slide_minutes", 0)
             values = [value for value, _label in SLIDE_CHOICES]
             self.slide_row.set_selected(values.index(minutes) if minutes in values else 0)
+
+            self.login_switch.set_active(system.autostart_enabled())
+            self._sync_login_looks(config.get("autostart_profile"))
         finally:
             self.updating = False
         self.refresh_status()
+
+    def _sync_login_looks(self, selected_id):
+        profiles = store.load_profiles()
+        self.login_look_values = [None]
+        self.login_look_labels = ["Last applied look"]
+        for profile in profiles:
+            self.login_look_values.append(profile.get("id"))
+            self.login_look_labels.append(profile.get("name") or "Untitled look")
+        self.login_look_row.set_model(Gtk.StringList.new(self.login_look_labels))
+        index = (self.login_look_values.index(selected_id)
+                 if selected_id in self.login_look_values else 0)
+        self.login_look_row.set_selected(index)
 
     def refresh_status(self):
         state = self.win.state or {}

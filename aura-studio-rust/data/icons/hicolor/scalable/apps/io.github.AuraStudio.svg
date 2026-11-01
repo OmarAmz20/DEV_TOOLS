@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c6cff"/>
+      <stop offset="0.55" stop-color="#5b45d6"/>
+      <stop offset="1" stop-color="#24124f"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe3c4"/>
+      <stop offset="1" stop-color="#ff9e8a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.32" cy="0.22" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#bg)"/>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#glow)"/>
+  <circle cx="64" cy="64" r="38" fill="none" stroke="#ffffff" stroke-opacity="0.13" stroke-width="2"/>
+  <circle cx="64" cy="64" r="48" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+  <circle cx="64" cy="64" r="20" fill="url(#sun)"/>
+  <path d="M64 27c8 12 8 23 0 33-8-10-8-21 0-33z" fill="#ffffff" fill-opacity="0.72"/>
+  <path d="M101 64c-12 8-23 8-33 0 10-8 21-8 33 0z" fill="#ffffff" fill-opacity="0.55"/>
+  <path d="M64 101c-8-12-8-23 0-33 8 10 8 21 0 33z" fill="#ffffff" fill-opacity="0.38"/>
+  <path d="M27 64c12-8 23-8 33 0-10 8-21 8-33 0z" fill="#ffffff" fill-opacity="0.24"/>
+  <circle cx="97" cy="31" r="4" fill="#ffe3c4"/>
+  <circle cx="31" cy="94" r="3" fill="#ffb5a7" fill-opacity="0.85"/>
+</svg>

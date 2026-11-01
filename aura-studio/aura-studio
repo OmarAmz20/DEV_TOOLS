@@ -7,6 +7,40 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
 PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONPATH
 
+# On 42-school machines goinfre is the big persistent mount.  Keep the Pixi
+# environment, its package cache and Aura's thumbnail cache there when it
+# exists; nothing changes on machines without ~/goinfre.
+find_goinfre_root() {
+    for base in "${AURA_GOINFRE:-}" "$HOME/goinfre"; do
+        if [ -n "$base" ] && [ -d "$base" ] && [ -w "$base" ]; then
+            printf '%s\n' "$base/aura-studio"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if STORAGE_ROOT=$(find_goinfre_root); then
+    mkdir -p "$STORAGE_ROOT/pixi" "$STORAGE_ROOT/cache"
+    if [ -L "$ROOT/.pixi" ] && [ ! -e "$ROOT/.pixi" ]; then
+        rm -f "$ROOT/.pixi"
+    fi
+    if [ ! -e "$ROOT/.pixi" ] && [ ! -L "$ROOT/.pixi" ]; then
+        ln -s "$STORAGE_ROOT/pixi" "$ROOT/.pixi"
+    fi
+    : "${PIXI_HOME:=$STORAGE_ROOT/pixi-home}"
+    : "${PIXI_CACHE_DIR:=$STORAGE_ROOT/pixi-cache}"
+    : "${AURA_CACHE_DIR:=$STORAGE_ROOT/cache}"
+    export PIXI_HOME PIXI_CACHE_DIR AURA_CACHE_DIR
+fi
+
+# If the checkout (or .pixi) was moved, Pixi refuses its old absolute prefix.
+# Repair the text files in place instead of downloading the environment again.
+if [ -f "$ROOT/.pixi/envs/default/conda-meta/pixi_env_prefix" ]; then
+    python3 "$ROOT/scripts/fix-pixi-prefix.py" "$ROOT/.pixi/envs/default" \
+        >/dev/null 2>&1 || true
+fi
+
 MODE=pixi
 if [ -f "$ROOT/.aura-install-mode" ]; then
     MODE=$(cat "$ROOT/.aura-install-mode" 2>/dev/null || printf 'pixi')

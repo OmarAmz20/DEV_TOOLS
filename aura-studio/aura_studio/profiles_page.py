@@ -11,7 +11,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
-from . import palette, store, widgets  # noqa: E402
+from . import palette, store, system, widgets  # noqa: E402
 
 
 class ProfilesPage(Gtk.Box):
@@ -101,12 +101,22 @@ class ProfilesPage(Gtk.Box):
             badge = Gtk.Label(label="APPLIED", css_classes=["aura-badge", "current"],
                               valign=Gtk.Align.CENTER)
             row.add_prefix(badge)
+        if profile.get("id") == self.win.config.get("autostart_profile"):
+            login_badge = Gtk.Label(label="AT LOGIN", css_classes=["aura-badge", "current"],
+                                    valign=Gtk.Align.CENTER)
+            row.add_prefix(login_badge)
 
         actions = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
         apply = Gtk.Button(label="Reapply" if applied else "Apply")
         apply.add_css_class("flat")
         apply.connect("clicked", lambda _b, p=profile: self.win.apply_profile(p))
         actions.append(apply)
+
+        login = Gtk.Button(icon_name="system-log-out-symbolic",
+                           tooltip_text="Reapply this look after login",
+                           css_classes=["flat", "circular"])
+        login.connect("clicked", lambda _b, p=profile: self.use_at_login(p))
+        actions.append(login)
 
         export = Gtk.Button(icon_name="document-save-symbolic", tooltip_text="Export profile as JSON",
                             css_classes=["flat", "circular"])
@@ -120,6 +130,18 @@ class ProfilesPage(Gtk.Box):
         actions.append(delete)
         row.add_suffix(actions)
         return row
+
+    def use_at_login(self, profile):
+        store.save_config(autostart_profile=profile["id"])
+        try:
+            system.set_autostart(True, profile=profile["id"])
+        except OSError as error:
+            self.win.toast(f"Could not update the login entry: {error}")
+            return
+        self.win.reload_config()
+        self.rebuild()
+        self.win.look_page.sync_from_config()
+        self.win.toast(f"“{profile.get('name', 'This look')}” will be applied after login")
 
     # --- save / import / export -----------------------------------------------------
 
@@ -228,6 +250,12 @@ class ProfilesPage(Gtk.Box):
         def response(source, response_id):
             if response_id == "delete":
                 store.delete_profile(profile["id"])
+                if self.win.config.get("autostart_profile") == profile["id"]:
+                    store.save_config(autostart_profile=None)
+                    self.win.reload_config()
+                    if system.autostart_enabled():
+                        system.set_autostart(True)
+                    self.win.look_page.sync_from_config()
                 self.rebuild()
                 self.win.toast("Profile deleted")
         dialog.connect("response", response)

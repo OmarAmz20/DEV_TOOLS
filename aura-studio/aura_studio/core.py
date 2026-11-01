@@ -8,7 +8,7 @@ from . import library, palette as palette_module, store, system
 
 OPTION_KEYS = (
     "glass", "recolour_gtk", "terminal", "lock_screen", "icon_theme",
-    "cursor_theme", "font", "mono_font", "text_scale",
+    "cursor_theme", "cursor_size", "font", "mono_font", "text_scale",
 )
 
 
@@ -73,7 +73,7 @@ def apply_wallpaper(path, config=None, palette_value=None, match_colors=None):
         still = library.still_for(path, 1920) or path
         applied_palette = palette_value or palette_module.from_image(
             still, config.get("style", "balanced"), config.get("accent"))
-    result = system.apply_wallpaper(path)
+    result = system.apply_wallpaper(path, mode=config.get("wallpaper_mode", "fill"))
     if applied_palette:
         system.apply_theme(applied_palette, mode, config, still=result["path"] or path)
     options = options_snapshot(config)
@@ -114,9 +114,10 @@ def apply_profile(profile):
         raise ValueError("profile has invalid light/dark colours")
     config = store.load_config()
     wallpaper = profile.get("wallpaper")
+    wallpaper_mode = profile.get("wallpaper_mode", config.get("wallpaper_mode", "fill"))
     result = None
     if wallpaper and os.path.isfile(wallpaper) and library.is_wallpaper(wallpaper):
-        result = system.apply_wallpaper(os.path.realpath(wallpaper))
+        result = system.apply_wallpaper(os.path.realpath(wallpaper), mode=wallpaper_mode)
         wallpaper = os.path.realpath(wallpaper)
 
     mode_setting = profile.get("mode", "auto")
@@ -135,6 +136,7 @@ def apply_profile(profile):
         "dark_from": int(profile.get("dark_from", config["dark_from"])),
         "style": profile.get("style", config["style"]),
         "accent": profile.get("accent"),
+        "wallpaper_mode": wallpaper_mode,
         **options,
     }
     still = result["path"] if result else (wallpaper if wallpaper and os.path.isfile(wallpaper)
@@ -156,8 +158,40 @@ def restore():
 def next_wallpaper(folder=None, current=None):
     config = store.load_config()
     folder = folder or config["folder"]
-    path = library.shuffle([entry["path"] for entry in library.scan(folder)],
-                           current or store.load_state().get("wallpaper"))
+    path = library.next_path([entry["path"] for entry in library.scan(folder)],
+                             current or store.load_state().get("wallpaper"),
+                             config.get("slideshow_order", "shuffle"))
     if not path:
         return None
     return apply_wallpaper(path, config)
+
+
+def apply_saved(profile_id=None):
+    """Reapply the chosen look without opening the window.
+
+    Used by the login autostart entry: it restores the wallpaper, colours and
+    desktop options from either a saved profile or the last applied look, then
+    the process exits.  Nothing is done when there is nothing saved yet.
+    """
+    config = store.load_config()
+    profile_id = profile_id or config.get("autostart_profile")
+    if profile_id:
+        profile = next((item for item in store.load_profiles()
+                        if item.get("id") == profile_id), None)
+        if profile:
+            return apply_profile(profile)
+
+    state = store.load_state()
+    palette_value = state.get("palette")
+    wallpaper = state.get("wallpaper")
+    if wallpaper and os.path.isfile(wallpaper) and library.is_wallpaper(wallpaper):
+        return apply_wallpaper(wallpaper, config, palette_value=palette_value,
+                               match_colors=bool(palette_value))
+    if palette_value:
+        mode = apply_colours(
+            palette_value, config, mode=effective_mode(config),
+            options=options_snapshot(config),
+            source=state.get("palette_source") or state.get("wallpaper"),
+            still=state.get("still"))
+        return {"wallpaper": None, "result": None, "mode": mode, "config": config}
+    return None

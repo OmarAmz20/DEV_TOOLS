@@ -1,0 +1,29 @@
+[workspace]
+name = "aura-studio"
+version = "1.0.0"
+description = "Wallpapers, palettes and desktop looks for Linux"
+authors = ["Aura Studio contributors"]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.12.*"
+pygobject = ">=3.50,<4"
+gtk4 = ">=4.10"
+libadwaita = ">=1.6"
+gdk-pixbuf = ">=2.42"
+gsettings-desktop-schemas = "*"
+adwaita-icon-theme = "*"
+rust = ">=1.99.1,<1.100"
+maturin = ">=1.16.0,<2"
+
+[tasks]
+build-rust = "sh scripts/build-rust.sh"
+run = "python -m aura_studio"
+x11 = "GDK_BACKEND=x11 python -m aura_studio"
+status = "python -m aura_studio status"
+test = "python -m unittest discover -s tests -v"
+test-python = "AURA_FORCE_PYTHON=1 python -m unittest discover -s tests -v"
+
+[activation]
+scripts = ["scripts/activate.sh"]

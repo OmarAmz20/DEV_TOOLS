@@ -1,0 +1,14 @@
+[package]
+name = "aura-py"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "PyO3 bindings for the Aura Studio Rust core"
+
+[lib]
+name = "aura_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+aura-core = { path = "../aura-core" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py312"] }

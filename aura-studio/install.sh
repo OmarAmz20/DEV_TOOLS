@@ -10,19 +10,22 @@
 #   ./install.sh                 Pixi environment (recommended)
 #   ./install.sh --system        use the distro's Python + GTK packages
 #   ./install.sh --no-helpers    skip installing optional system helpers
+#   ./install.sh --no-autostart  do not reapply the saved look after login
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PYTHON=${PYTHON:-python3}
 USE_PIXI=1
 INSTALL_HELPERS=1
+INSTALL_AUTOSTART=1
 PIXI_BIN_DIR=${PIXI_BIN_DIR:-"$HOME/.local/bin"}
-PIXI_HOME=${PIXI_HOME:-"$HOME/.pixi"}
+PIXI_HOME=${PIXI_HOME:-}
 
 for argument in "$@"; do
     case "$argument" in
         --system|--no-pixi) USE_PIXI=0 ;;
         --no-helpers|--no-system-deps) INSTALL_HELPERS=0 ;;
+        --no-autostart) INSTALL_AUTOSTART=0 ;;
         -h|--help)
             cat <<'USAGE'
 Install Aura Studio for the current user.
@@ -30,15 +33,36 @@ Install Aura Studio for the current user.
   ./install.sh                 Pixi environment (recommended)
   ./install.sh --system        use the distro's Python + GTK packages
   ./install.sh --no-helpers    skip installing optional system helpers
+  ./install.sh --no-autostart  do not reapply the saved look after login
 
 Pixi is installed into ~/.local/bin when missing.  The app itself needs no
 root; optional helpers (ffmpeg, dconf, feh) may ask for sudo.
+
+On 42-school machines, ~/goinfre is detected automatically: the Pixi
+environment, package cache and thumbnail cache live there instead of in your
+small home quota.
 USAGE
             exit 0
             ;;
         *) echo "install.sh: unknown option: $argument" >&2; exit 2 ;;
     esac
 done
+
+# Keep big files off the home quota on 42-school machines.
+GOINFRE_ROOT=""
+for candidate in "${AURA_GOINFRE:-}" "$HOME/goinfre"; do
+    if [ -n "$candidate" ] && [ -d "$candidate" ] && [ -w "$candidate" ]; then
+        AURA_GOINFRE=$(readlink -f -- "$candidate" 2>/dev/null || printf '%s' "$candidate")
+        GOINFRE_ROOT="$AURA_GOINFRE/aura-studio"
+        mkdir -p "$GOINFRE_ROOT" "$GOINFRE_ROOT/cache"
+        : "${PIXI_HOME:=$GOINFRE_ROOT/pixi-home}"
+        : "${PIXI_CACHE_DIR:=$GOINFRE_ROOT/pixi-cache}"
+        export AURA_GOINFRE PIXI_HOME PIXI_CACHE_DIR
+        break
+    fi
+done
+: "${PIXI_HOME:=$HOME/.pixi}"
+export PIXI_HOME
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -49,11 +73,6 @@ if [ "${XDG_SESSION_TYPE:-}" = "x11" ] || \
    { [ -z "${XDG_SESSION_TYPE:-}" ] && [ -n "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; }; then
     x11=1
 fi
-case "${XDG_CURRENT_DESKTOP:-}" in
-    *GNOME*|*gnome*|*ubuntu*|*Ubuntu*) gnome=1 ;;
-    *) gnome=0 ;;
-esac
-
 find_pixi() {
     for candidate in "$(command -v pixi 2>/dev/null || true)" \
                      "$PIXI_BIN_DIR/pixi" \
@@ -64,6 +83,33 @@ find_pixi() {
         fi
     done
     return 1
+}
+
+prepare_goinfre_environment() {
+    [ -n "$GOINFRE_ROOT" ] || return 0
+    target="$GOINFRE_ROOT/pixi"
+    if [ -L "$ROOT/.pixi" ] && [ -e "$ROOT/.pixi" ]; then
+        return 0
+    fi
+    if [ -L "$ROOT/.pixi" ]; then
+        rm -f "$ROOT/.pixi"
+    fi
+    if [ -e "$ROOT/.pixi" ]; then
+        if [ -e "$target" ]; then
+            warn "$ROOT/.pixi and $target both exist; keeping the local environment."
+            warn "Remove the local .pixi later if you want the goinfre copy to be used."
+            return 0
+        fi
+        say "Moving the Pixi environment into goinfre…"
+        if mv "$ROOT/.pixi" "$target" 2>/dev/null; then
+            ln -s "$target" "$ROOT/.pixi"
+        else
+            warn "Could not move $ROOT/.pixi into goinfre; keeping it in place."
+        fi
+    else
+        mkdir -p "$target"
+        ln -s "$target" "$ROOT/.pixi"
+    fi
 }
 
 install_pixi() {
@@ -245,6 +291,11 @@ maybe_install_helpers() {
 }
 
 if [ "$USE_PIXI" -eq 1 ]; then
+    prepare_goinfre_environment
+    if [ -f "$ROOT/.pixi/envs/default/conda-meta/pixi_env_prefix" ]; then
+        "$PYTHON" "$ROOT/scripts/fix-pixi-prefix.py" \
+            "$ROOT/.pixi/envs/default" >/dev/null 2>&1 || true
+    fi
     if ! install_pixi_environment; then
         USE_PIXI=0
     fi
@@ -284,23 +335,22 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1 && [ -d "$DATA_HOME/icons/hi
     gtk-update-icon-cache -f -t "$DATA_HOME/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
-# feh cannot remember a root pixmap across login, so give non-GNOME X11 users a
-# tiny autostart entry that puts the last Aura wallpaper back.  GNOME stores it
-# in gsettings and does not need this.
-if [ "$x11" -eq 1 ] && [ "$gnome" -eq 0 ]; then
-    AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
-    mkdir -p "$AUTOSTART"
-    cat > "$AUTOSTART/io.github.AuraStudio.wallpaper.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Aura Studio wallpaper
-Comment=Reapply the last Aura Studio wallpaper after login
-Exec=$ROOT/aura-studio reapply-wallpaper
-Terminal=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true
-EOF
-    chmod 644 "$AUTOSTART/io.github.AuraStudio.wallpaper.desktop"
+# Reapply the chosen look after login.  This works on GNOME, X11, Wayland and
+# desktops that reset themes, icons, fonts or the wallpaper between sessions.
+# The command applies the saved look in the background and exits without
+# opening the window.
+if [ "$INSTALL_AUTOSTART" -eq 1 ]; then
+    if "$BIN/aura-studio" autostart on >/dev/null 2>&1; then
+        say "Login reapply enabled: the selected look is restored after you log in."
+        # Apply the look that is already saved, without opening the window.
+        if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+            "$BIN/aura-studio" apply-saved --quiet --log >/dev/null 2>&1 || true
+        fi
+    else
+        warn "Could not enable login reapply. Run: aura-studio autostart on"
+    fi
+else
+    "$BIN/aura-studio" autostart off >/dev/null 2>&1 || true
 fi
 
 printf '\nAura Studio is installed.\n'
@@ -310,6 +360,14 @@ printf '  Environment:    %s\n' \
     "$( [ "$USE_PIXI" -eq 1 ] && printf '%s' "$ROOT/.pixi/envs/default" || printf 'system Python' )"
 printf '  Pixi:           %s\n' \
     "$( [ "$USE_PIXI" -eq 1 ] && find_pixi || printf 'not used' )"
+if [ -n "$GOINFRE_ROOT" ]; then
+    printf '  Goinfre:        %s\n' "$GOINFRE_ROOT"
+    if [ "$USE_PIXI" -eq 1 ]; then
+        printf '                  (Pixi environment, package cache and thumbnails)\n'
+    else
+        printf '                  (package cache and thumbnails)\n'
+    fi
+fi
 printf '\nOpen Aura Studio from your app launcher, or run: aura-studio\n'
 if ! command -v aura-studio >/dev/null 2>&1; then
     printf 'If the command is not found yet, use: %s/aura-studio (or log in again).\n' "$BIN"
@@ -318,4 +376,6 @@ if [ "${XDG_SESSION_TYPE:-}" = "x11" ]; then
     printf 'X11: wallpapers use GNOME settings on GNOME, or feh on other desktops.\n'
     printf '     For transparent windows on non-GNOME X11, install and run picom.\n'
 fi
+printf 'Login reapply: %s (aura-studio autostart status)\n' \
+    "$( [ "$INSTALL_AUTOSTART" -eq 1 ] && printf 'on' || printf 'off' )"
 printf 'Uninstall the launcher with ./uninstall.sh (settings and profiles stay).\n\n'

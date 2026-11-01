@@ -534,7 +534,8 @@ class AuraWindow(Adw.ApplicationWindow):
             "palette_source": source,
             "created": time.time(),
         }
-        for key in ("mode", "light_from", "dark_from", "style", "accent"):
+        for key in ("mode", "light_from", "dark_from", "style", "accent",
+                    "wallpaper_mode"):
             profile[key] = self.config.get(key)
         profile.update(core.options_snapshot(self.config))
         store.save_profile(profile)
@@ -638,7 +639,8 @@ class AuraWindow(Adw.ApplicationWindow):
             self.toast("Still working on the last change…")
             return
         paths = [entry["path"] for entry in library.scan(self.config["folder"])]
-        path = library.shuffle(paths, self.state.get("wallpaper") or self.selection)
+        path = library.next_path(paths, self.state.get("wallpaper") or self.selection,
+                                 self.config.get("slideshow_order", "shuffle"))
         if not path:
             self.toast("Nothing else to pick in this folder")
             return
@@ -654,7 +656,8 @@ class AuraWindow(Adw.ApplicationWindow):
             return True
         self._slide_next = time.monotonic() + max(1, int(self.config.get("slide_minutes", 1))) * 60
         paths = [entry["path"] for entry in library.scan(self.config["folder"])]
-        path = library.shuffle(paths, self.state.get("wallpaper") or self.selection)
+        path = library.next_path(paths, self.state.get("wallpaper") or self.selection,
+                                 self.config.get("slideshow_order", "shuffle"))
         if not path:
             if not self._slide_warned:
                 self.toast("Slideshow is on, but there is nothing else in the folder")
