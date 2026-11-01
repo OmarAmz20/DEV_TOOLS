@@ -360,29 +360,35 @@ def kitty_theme(p):
     return "\n".join(lines) + "\n"
 
 
-_GLASS_CSS = """
+def _glass_css(opacity=0.72):
+    window = min(max(float(opacity), 0.15), 1.0)
+    header = min(max(window * 0.67, 0.12), 0.95)
+    backdrop = min(max(window * 0.58, 0.10), 0.90)
+    view = min(max(window * 0.67, 0.12), 0.95)
+    sidebar = min(max(window * 0.58, 0.10), 0.90)
+    return f"""
 /* see-through windows: the wallpaper shows through, text stays solid */
-window.background:not(.popup):not(tooltip):not(.solid-csd):not(.desktopwindow) {
-  background-color: alpha(@window_bg_color, 0.72);
-}
-headerbar, .titlebar:not(headerbar) { background-color: alpha(@headerbar_bg_color, 0.48); }
-headerbar:backdrop, .titlebar:not(headerbar):backdrop { background-color: alpha(@headerbar_backdrop_color, 0.42); }
+window.background:not(.popup):not(tooltip):not(.solid-csd):not(.desktopwindow) {{
+  background-color: alpha(@window_bg_color, {window:.2f});
+}}
+headerbar, .titlebar:not(headerbar) {{ background-color: alpha(@headerbar_bg_color, {header:.2f}); }}
+headerbar:backdrop, .titlebar:not(headerbar):backdrop {{ background-color: alpha(@headerbar_backdrop_color, {backdrop:.2f}); }}
 .view, textview text, iconview, treeview.view, list, listview, columnview, .content-view,
-.boxed-list, scrolledwindow > viewport > list, entry, spinbutton {
-  background-color: alpha(@view_bg_color, 0.48);
-}
-.sidebar, placessidebar, stacksidebar, .navigation-sidebar, .sidebar-pane {
-  background-color: alpha(@sidebar_bg_color, 0.42);
-}
-list row, listview row, .card, frame > border { background-color: transparent; }
+.boxed-list, scrolledwindow > viewport > list, entry, spinbutton {{
+  background-color: alpha(@view_bg_color, {view:.2f});
+}}
+.sidebar, placessidebar, stacksidebar, .navigation-sidebar, .sidebar-pane {{
+  background-color: alpha(@sidebar_bg_color, {sidebar:.2f});
+}}
+list row, listview row, .card, frame > border {{ background-color: transparent; }}
 popover > contents, popover.background > contents, menu, .menu, .context-menu, tooltip,
-tooltip.background, messagedialog, dialog.background, window.dialog {
+tooltip.background, messagedialog, dialog.background, window.dialog {{
   background-color: @popover_bg_color;
-}
+}}
 """
 
 
-def gtk_css(p, dark, glass=False):
+def gtk_css(p, dark, glass=False, opacity=0.72):
     """A GTK 3 + GTK 4 stylesheet with libadwaita's colour names."""
     if not valid_mode(p):
         raise ValueError("invalid palette colours")
@@ -439,7 +445,7 @@ def gtk_css(p, dark, glass=False):
     text += "".join(f"@define-color {name} {value};\n" for name, value in colours.items())
     text += "\nwindow.desktopwindow { background-color: transparent; }\n"
     if glass:
-        text += _GLASS_CSS
+        text += _glass_css(opacity)
     return text
 
 

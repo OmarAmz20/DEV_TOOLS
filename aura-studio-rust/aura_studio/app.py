@@ -276,6 +276,35 @@ class AuraWindow(Adw.ApplicationWindow):
         self.footer_backend.set_label(f"Wallpaper: {backend}")
         self.footer_session.set_label(f"{system.session_label()} · Aura {VERSION}")
 
+    def open_custom_css(self):
+        try:
+            os.makedirs(store.CONFIG_DIR, exist_ok=True)
+            if not os.path.exists(store.CUSTOM_CSS):
+                store.write_text(
+                    store.CUSTOM_CSS,
+                    "/* Aura Studio custom CSS.\n"
+                    " * This file is appended to the generated GTK theme and is\n"
+                    " * never overwritten by Aura. Use it for extra tweaks:\n"
+                    " *   window { border-radius: 10px; }\n"
+                    " */\n")
+            self._open_path(store.CUSTOM_CSS)
+        except OSError as error:
+            self.toast(f"Could not open custom.css: {error}")
+
+    def open_hooks_folder(self):
+        try:
+            os.makedirs(store.HOOKS, exist_ok=True)
+            self._open_path(store.HOOKS)
+        except OSError as error:
+            self.toast(f"Could not open the hooks folder: {error}")
+
+    def _open_path(self, path):
+        try:
+            Gio.AppInfo.launch_default_for_uri(
+                Gio.File.new_for_path(path).get_uri(), None)
+        except GLib.Error as error:
+            self.toast(f"Could not open {path}: {error.message}")
+
     def reload_config(self):
         self.config = store.load_config()
         return self.config
@@ -467,7 +496,13 @@ class AuraWindow(Adw.ApplicationWindow):
         def done(result):
             self.refresh_after_apply()
             matched = result["matched"]
-            self.toast("Wallpaper set" + (" · desktop colours matched" if matched else ""))
+            backend = result["result"].get("backend")
+            message = "Wallpaper set"
+            if result["result"].get("fallback"):
+                message += f" · {backend} fallback"
+            if matched:
+                message += " · desktop colours matched"
+            self.toast(message)
         self._run(work, done, "Could not set wallpaper: ")
 
     def apply_colors(self):

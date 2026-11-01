@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -24,6 +25,18 @@ Usage:
   aura-studio reapply-wallpaper   restore the last wallpaper
   aura-studio restore             undo everything Aura changed
   aura-studio status              show backend, mode and current wallpaper
+  aura-studio doctor              diagnose GTK, dconf and wallpaper backends
+  aura-studio config              print every setting as JSON
+  aura-studio config get KEY      print one setting
+  aura-studio config set KEY VAL  change a setting (JSON values are accepted)
+  aura-studio config unset KEY    return one setting to its default
+  aura-studio config path         print the settings file path
+
+Examples:
+  aura-studio config set wallpaper_backend gnome
+  aura-studio config set glass true
+  aura-studio config set glass_opacity 0.82
+  aura-studio config set terminal_targets '["kitty", "gnome-terminal"]'
 
 Everything is stored in ~/.config/aura-studio and your cache directory.
 When ~/goinfre exists, Aura uses ~/goinfre/aura-studio for its large cache.
@@ -144,7 +157,14 @@ def _autostart(argv):
         if profile:
             profile = _profile_id(profile)
             store.save_config(autostart_profile=profile)
-        system.set_autostart(True, profile=profile)
+        delay = _option(argv, "--delay")
+        if delay is not None:
+            try:
+                store.save_config(autostart_delay=int(delay))
+            except ValueError:
+                raise ValueError("--delay needs a number of seconds")
+        system.set_autostart(True, profile=profile,
+                             delay=system.autostart_delay(store.load_config()))
         print("Login reapply enabled.")
         print(f"  Entry: {system.AUTOSTART_FILE}")
         return 0
@@ -158,6 +178,111 @@ def _autostart(argv):
             print(f"  Entry: {system.AUTOSTART_FILE}")
         return 0
     raise ValueError(f"autostart needs on, off or status (not {action!r})")
+
+
+def _typed_value(text):
+    """Turn a CLI argument into the JSON type the config expects."""
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return text
+
+
+def _config(argv):
+    from . import store
+    if len(argv) < 2 or argv[1] in ("show", "list"):
+        print(json.dumps(store.load_config(), indent=2, ensure_ascii=False))
+        return 0
+    action = argv[1]
+    if action == "path":
+        print(store.CONFIG)
+        return 0
+    if len(argv) < 3:
+        raise ValueError(f"config {action} needs a key")
+    key = argv[2]
+    if key not in store.DEFAULT_CONFIG:
+        raise ValueError(f"unknown setting: {key}")
+    if action == "get":
+        print(json.dumps(store.load_config()[key], ensure_ascii=False))
+        return 0
+    if action == "unset":
+        config = store.save_config(**{key: store.DEFAULT_CONFIG[key]})
+        print(json.dumps(config[key], ensure_ascii=False))
+        return 0
+    if action == "set":
+        if len(argv) < 4:
+            raise ValueError("config set needs a value")
+        value = _typed_value(" ".join(argv[3:]))
+        config = store.save_config(**{key: value})
+        print(json.dumps(config[key], ensure_ascii=False))
+        return 0
+    raise ValueError(f"config needs get, set, unset or path (not {action!r})")
+
+
+def _doctor(argv):
+    """A small Ubuntu/desktop health check that is safe to paste into a report."""
+    from . import __version__, store, system
+    checks = []
+
+    def add(name, ok, detail, required=True):
+        checks.append({"check": name, "ok": bool(ok), "required": required,
+                       "detail": detail})
+
+    add("Aura Studio", True, __version__)
+    add("Session", True, system.session_label())
+    add("Wallpaper backend", system.detect_backend(refresh=True)["name"] != "none",
+        system.backend_label())
+    preference = store.load_config().get("wallpaper_backend", "auto")
+    add("Backend preference", True, preference)
+    add("Config directory", os.access(store.CONFIG_DIR, os.W_OK) or
+        not os.path.exists(store.CONFIG_DIR), store.CONFIG_DIR)
+
+    try:
+        import gi
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gtk
+        gtk = f"{Gtk.get_major_version()}.{Gtk.get_minor_version()}.{Gtk.get_micro_version()}"
+        adw = f"{Adw.MAJOR_VERSION}.{Adw.MINOR_VERSION}.{Adw.MICRO_VERSION}"
+        add("GTK", Gtk.get_major_version() == 4 and Gtk.get_minor_version() >= 10, gtk)
+        add("libadwaita", Adw.MINOR_VERSION >= 5 or Adw.MAJOR_VERSION > 1, adw)
+    except Exception as error:
+        add("GTK / libadwaita", False, str(error))
+
+    writable = system._gnome_ready()
+    add("GSettings wallpaper key", writable,
+        "writable" if writable else "missing or locked (Aura will use another backend)",
+        required=False)
+    add("GSettings backend", True, os.environ.get("GSETTINGS_BACKEND") or "default")
+    add("Host gsettings", system._host_gsettings_enabled(),
+        "/usr/bin/gsettings" if system._host_gsettings_enabled() else
+        "not used (isolated backend)", required=False)
+    for name, command, required in (("dconf", "dconf", False),
+                                    ("ffmpeg", "ffmpeg", False),
+                                    ("feh", "feh", False)):
+        path = shutil.which(command)
+        add(name, bool(path), path or "not installed (optional)", required=required)
+    terminals = system.terminal_targets()
+    add("Terminals", True, ", ".join(terminals) or "none detected (optional)",
+        required=False)
+    add("Login reapply", True,
+        system.AUTOSTART_FILE if system.autostart_enabled() else "disabled (optional)")
+    add("Custom CSS", True,
+        store.CUSTOM_CSS if os.path.exists(store.CUSTOM_CSS) else
+        f"{store.CUSTOM_CSS} (not created yet)")
+
+    if "--json" in argv:
+        print(json.dumps(checks, indent=2, ensure_ascii=False))
+    else:
+        for item in checks:
+            if item["ok"]:
+                mark = "ok  "
+            else:
+                mark = "warn" if item["required"] else "info"
+            print(f"{mark}  {item['check']:<24} {item['detail']}")
+        if not all(item["ok"] for item in checks if item["required"]):
+            print("\nSome checks need attention. Run this command with --json for details.")
+    return 0 if all(item["ok"] for item in checks if item["required"]) else 1
 
 
 def main(argv=None):
@@ -228,6 +353,10 @@ def main(argv=None):
             return _apply_saved(argv[1:])
         if command == "autostart":
             return _autostart(argv)
+        if command == "config":
+            return _config(argv)
+        if command == "doctor":
+            return _doctor(argv)
         if command == "reapply-wallpaper":
             from . import core, library, store
             state = store.load_state()

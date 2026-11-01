@@ -74,8 +74,12 @@ if _rust is not None:
     def kitty_theme(value):
         return _rust.kitty_theme(value)
 
-    def gtk_css(value, dark, glass=False):
-        return _rust.gtk_css(value, dark, glass)
+    def gtk_css(value, dark, glass=False, opacity=0.72):
+        try:
+            return _rust.gtk_css(value, dark, glass, float(opacity))
+        except TypeError:
+            # An older aura_core.abi3.so from before opacity was configurable.
+            return _rust.gtk_css(value, dark, glass)
 
     def css_for_export(value, dark):
         return _rust.css_for_export(value, dark)

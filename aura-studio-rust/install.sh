@@ -4,8 +4,8 @@
 # By default this uses Pixi: it installs Pixi into ~/.local/bin when missing,
 # creates the Python/GTK/libadwaita environment from pixi.toml + pixi.lock,
 # then adds a launcher and desktop entry.  No root is required for the app
-# itself.  Optional desktop helpers (ffmpeg, dconf, feh) are installed with
-# the system package manager when possible.
+# itself.  Optional desktop helpers (ffmpeg, dconf, feh, GTK 3) are installed
+# with the system package manager when possible.
 #
 #   ./install.sh                 Pixi environment (recommended)
 #   ./install.sh --system        use the distro's Python + GTK packages
@@ -36,7 +36,7 @@ Install Aura Studio for the current user.
   ./install.sh --no-autostart  do not reapply the saved look after login
 
 Pixi is installed into ~/.local/bin when missing.  The app itself needs no
-root; optional helpers (ffmpeg, dconf, feh) may ask for sudo.
+root; optional helpers (ffmpeg, dconf, feh, GTK 3 on X11) may ask for sudo.
 
 On 42-school machines, ~/goinfre is detected automatically: the Pixi
 environment, package cache and thumbnail cache live there instead of in your
@@ -140,8 +140,11 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gtk, Adw
 if Gtk.get_major_version() != 4 or Gtk.get_minor_version() < 10:
     raise SystemExit("GTK 4.10 or newer is required")
-if Adw.MAJOR_VERSION < 1 or (Adw.MAJOR_VERSION == 1 and Adw.MINOR_VERSION < 6):
-    raise SystemExit("libadwaita 1.6 or newer is required")
+# The UI only needs APIs present in libadwaita 1.5, which is what Ubuntu 24.04
+# ships.  Pixi still provides a newer build, but system installs no longer
+# fail just because 1.6 is unavailable.
+if Adw.MAJOR_VERSION < 1 or (Adw.MAJOR_VERSION == 1 and Adw.MINOR_VERSION < 5):
+    raise SystemExit("libadwaita 1.5 or newer is required")
 PY
 }
 
@@ -185,7 +188,7 @@ install_system_environment() {
     if check_system_gtk "$PYTHON" >/dev/null 2>&1; then
         return 0
     fi
-    warn "System Python does not have GTK 4.10+ / libadwaita 1.6+."
+    warn "System Python does not have GTK 4.10+ / libadwaita 1.5+."
 
     if [ -r /etc/os-release ]; then
         # shellcheck disable=SC1091
@@ -195,6 +198,9 @@ install_system_environment() {
         *debian*|*ubuntu*)
             say "Install them with:"
             say "  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gdkpixbuf-2.0"
+            if [ "$x11" -eq 1 ]; then
+                say "  sudo apt install gir1.2-gtk-3.0   # fallback desktop window"
+            fi
             ;;
         *fedora*)
             say "Install them with:"
@@ -205,7 +211,7 @@ install_system_environment() {
             say "  sudo pacman -S python-gobject gtk4 libadwaita"
             ;;
         *)
-            say "Install PyGObject, GTK 4.10+ and libadwaita 1.6+ for your distribution."
+            say "Install PyGObject, GTK 4.10+ and libadwaita 1.5+ for your distribution."
             ;;
     esac
     return 1
@@ -250,6 +256,16 @@ maybe_install_helpers() {
 
     if [ "$x11" -eq 1 ]; then
         command -v feh >/dev/null 2>&1 || missing="$missing feh"
+        # The X11 desktop-window fallback uses the host's GTK 3.  It is only
+        # needed for Xorg, but missing it used to fail silently.
+        if ! "$PYTHON" - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+PY
+        then
+            missing="$missing gtk3"
+        fi
     fi
     [ -n "$missing" ] || return 0
 
@@ -264,6 +280,7 @@ maybe_install_helpers() {
             for helper in $missing; do
                 case "$helper" in
                     dconf) packages="$packages dconf-cli" ;;
+                    gtk3) packages="$packages gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0" ;;
                     *) packages="$packages $helper" ;;
                 esac
             done
@@ -272,7 +289,13 @@ maybe_install_helpers() {
             ;;
         *fedora*)
             manager="dnf"
-            packages="$missing"
+            packages=""
+            for helper in $missing; do
+                case "$helper" in
+                    gtk3) packages="$packages gtk3" ;;
+                    *) packages="$packages $helper" ;;
+                esac
+            done
             update=""
             install="dnf install -y"
             ;;
@@ -282,6 +305,7 @@ maybe_install_helpers() {
             for helper in $missing; do
                 case "$helper" in
                     dconf) packages="$packages dconf" ;;
+                    gtk3) packages="$packages gtk3" ;;
                     *) packages="$packages $helper" ;;
                 esac
             done
@@ -334,7 +358,7 @@ if [ "$USE_PIXI" -eq 1 ]; then
 fi
 if [ "$USE_PIXI" -eq 0 ]; then
     if ! install_system_environment; then
-        die "Aura Studio needs GTK 4.10+ and libadwaita 1.6+."
+        die "Aura Studio needs GTK 4.10+ and libadwaita 1.5+."
     fi
 fi
 

@@ -77,8 +77,8 @@ Aura looks for a wallpaper backend at runtime:
 | Hyprland with hyprpaper | `hyprctl hyprpaper` | Preloads and displays the picture |
 | Wayland (wlroots) | `awww` | Starts the daemon if needed and displays the picture |
 | Wayland without a daemon | `swaybg` | Runs a small background process |
-| X11 | `feh` | Sets the root pixmap |
-| GNOME | `gsettings` | Sets `picture-uri` and `picture-uri-dark` |
+| X11 (non-GNOME) | `feh` | Sets the root pixmap |
+| GNOME | host `gsettings` | Sets `picture-uri` and `picture-uri-dark` for the shell and lock screen |
 
 Colours are applied the same way everywhere: a generated GTK 3/4 theme,
 `gtk.css` imports, a Kitty theme include, a GNOME Terminal profile when
@@ -86,16 +86,21 @@ available, and standard GNOME desktop settings for icons/fonts/cursor.
 
 ## Requirements
 
-Aura uses a **Pixi** environment for Python, GTK 4.10+, libadwaita 1.6+,
+Aura uses a **Pixi** environment for Python, GTK 4.10+, libadwaita 1.5+,
 GdkPixbuf and the Rust toolchain, so you do not need to install PyGObject or
-GTK by hand. Pixi itself is installed by `install.sh` when it is missing.
+GTK by hand. Pixi itself is installed by `install.sh` when it is missing. The
+Pixi environment includes a recent libadwaita; the system fallback also works
+with the libadwaita 1.5 that ships on Ubuntu 24.04.
 
 - Linux x86_64 (Ubuntu, Debian, Arch, Fedora, …)
 - X11 or Wayland
+- Ubuntu 24.04+ works with `--system` (GTK 4.14 / libadwaita 1.5); Ubuntu
+  22.04's GTK 4.6 is too old, so use the default Pixi install there
 - `curl` or `wget` while installing (to bootstrap Pixi)
 - Optional system helpers, installed by `install.sh` when possible:
-  `ffmpeg` for video thumbnails, `dconf` for GNOME Terminal colours, and `feh`
-  for wallpaper on non-GNOME X11 desktops.
+  `ffmpeg` for video thumbnails, `dconf` for GNOME Terminal colours,
+  `gir1.2-gtk-3.0` for the X11 desktop-window fallback, and `feh` for
+  wallpaper on non-GNOME X11 desktops.
 
 No root is needed for the app or the Pixi environment. Optional system helpers
 may ask for `sudo`.
@@ -105,8 +110,12 @@ Python + GTK packages instead:
 
 ```sh
 sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
-    gir1.2-gdkpixbuf-2.0 ffmpeg dconf-cli feh   # Ubuntu/Debian
+    gir1.2-gdkpixbuf-2.0 gir1.2-gtk-3.0 \
+    ffmpeg dconf-cli feh   # Ubuntu/Debian
 ```
+
+`gir1.2-gtk-3.0` is only used by the X11 desktop-window fallback; X11 users
+also benefit from `feh`.
 
 ## Install and run
 
@@ -115,7 +124,7 @@ cd ~/Downloads/aura-studio
 ./install.sh
 ```
 
-`install.sh` does five things:
+`install.sh` does six things:
 
 1. Installs **Pixi** into `~/.local/bin` if it is not already available.
 2. Creates the app environment from `pixi.toml` + `pixi.lock`
@@ -128,8 +137,9 @@ cd ~/Downloads/aura-studio
 5. Adds a login autostart entry that reapplies your selected look in the
    background and exits. It also applies an already-saved look once, without
    opening the window. Use `--no-autostart` to skip it.
-6. Installs optional helpers such as `ffmpeg`, `dconf-cli` and `feh` with your
-   distro's package manager when they are missing.
+6. Installs optional helpers such as `ffmpeg`, `dconf-cli`, `feh` and GTK 3
+   (for the X11 fallback) with your distro's package manager when they are
+   missing.
 
 Then open **Aura Studio** from your app launcher, or run:
 
@@ -198,20 +208,33 @@ exec-once = ~/Documents/tools/aura-studio/aura-studio apply-saved --delay 2 --lo
 
 Aura runs natively on Ubuntu X11:
 
-- **Ubuntu GNOME on Xorg** changes the wallpaper through `gsettings`, which
-  works with the lock screen. The login entry reapplies it if the session
-  resets it.
-- **Other X11 desktops** use `feh`; the installer adds `feh` when needed. The
+- **Ubuntu GNOME on Xorg** changes the wallpaper through the host's
+  `gsettings`/dconf, so the picture stays visible in Activities, after
+  workspace changes and on the lock screen. The login entry reapplies it if
+  the session resets it.
+- **Other X11 desktops** use `feh`; the installer adds `feh` when needed. If
+  feh is unavailable, Aura's desktop-window fallback is marked sticky on every
+  workspace so switching desktops does not reveal the old background. The
   login entry reapplies the last wallpaper and every desktop option after a
   logout/reboot (feh cannot remember it by itself). The primary supported X11
   setup is Ubuntu GNOME; on XFCE/KDE the desktop's own wallpaper service may
   take over, while colours, profiles and terminal settings still work.
 - **Light/dark colours, icons, fonts and cursor** use standard GNOME settings.
+- **If automatic detection picks the wrong wallpaper engine**, pin one in
+  **Look & Feel → Wallpaper → Wallpaper engine**, or run
+  `aura-studio config set wallpaper_backend gnome`. Aura falls back to the
+  working backend if the pinned one disappears.
+- **Restore is non-destructive:** Aura only puts back a setting when it still
+  has the value Aura wrote. If you changed your theme, font, wallpaper or
+  terminal default afterwards, that change is left alone.
 - **Transparent windows** need a compositor. GNOME's Mutter already provides
   one; on other X11 desktops install `picom` and run `picom --daemon`.
 - The Pixi activation script (`scripts/activate.sh`) connects the Pixi GLib
   stack to your real dconf settings, so “Apply this look” changes your actual
   desktop rather than the isolated environment.
+- Run `aura-studio doctor` after an upgrade. It reports the GTK/libadwaita
+  versions, dconf and GSettings access, the chosen backend, helpers and login
+  entry without changing anything.
 
 If you ever suspect the Pixi environment is the problem, compare with:
 
@@ -236,6 +259,41 @@ Then report which one behaves differently.
 7. If you ever want your old desktop back, use **Restore original look**
    (sidebar or ⋮ menu).
 
+## Make it yours
+
+Most controls live in **Look & Feel**, but a few are deliberately one level
+deeper for people who want them:
+
+- **Wallpaper engine** — pin GNOME settings, feh, the X11 desktop window,
+  DankMaterialShell, hyprpaper, awww or swaybg. If the chosen backend is not
+  available, Aura falls back to automatic detection instead of failing.
+- **Terminal targets** — when both Kitty and GNOME Terminal are installed,
+  choose which ones receive colours.
+- **Window opacity** — with see-through windows on, slide the amount of
+  wallpaper that shows through (20–95%).
+- **Slideshow interval** — any number of minutes, not just the presets.
+- **Login delay** — wait up to five minutes after login before reapplying.
+- **Custom stylesheet** — `~/.config/aura-studio/custom.css` is appended to
+  every generated GTK theme and is never overwritten. The button in
+  **Look & Feel → Finishing touches** creates and opens it.
+- **Hooks** — executable scripts in `~/.config/aura-studio/hooks/` run after
+  each recolour; see [Hooks](#hooks).
+
+Every option can also be read or changed without opening the window:
+
+```sh
+aura-studio config                          # all settings as JSON
+aura-studio config get wallpaper_backend
+aura-studio config set wallpaper_backend gnome
+aura-studio config set glass_opacity 0.82
+aura-studio config set terminal_targets '["kitty", "gnome-terminal"]'
+aura-studio config unset glass_opacity
+aura-studio doctor                          # GTK, dconf, backend and helper check
+```
+
+`AURA_WALLPAPER_BACKEND=feh aura-studio` temporarily overrides the stored
+backend choice.
+
 ## Command line
 
 ```
@@ -251,6 +309,8 @@ aura-studio apply-profile NAME       apply a saved profile by name or id
 aura-studio apply-saved              reapply the saved look, then exit
 aura-studio autostart on | off       enable/disable reapply after login
 aura-studio autostart status         show whether login reapply is enabled
+aura-studio config [get|set|unset]   inspect or change any setting
+aura-studio doctor [--json]          diagnose GTK, dconf and the desktop
 aura-studio reapply-wallpaper        restore the last wallpaper
 aura-studio restore                  undo everything Aura changed
 aura-studio status                   show backend, session, mode and wallpaper
@@ -264,6 +324,7 @@ aura-studio status                   show backend, session, mode and wallpaper
 | `~/.config/aura-studio/state.json` | the applied wallpaper and palette |
 | `~/.config/aura-studio/originals.json` | snapshot used by Restore |
 | `~/.config/aura-studio/theme.css` | the generated GTK colours |
+| `~/.config/aura-studio/custom.css` | your extra CSS, appended to generated themes |
 | `~/.config/aura-studio/profiles/` | saved looks |
 | `~/.config/aura-studio/exports/` | terminal colour snippets from the last apply |
 | `~/.config/aura-studio/hooks/` | optional post-recolour scripts |
@@ -279,8 +340,9 @@ aura-studio status                   show backend, session, mode and wallpaper
 | `scripts/activate.sh` | connects Pixi GLib to the real dconf settings backend |
 
 Set `AURA_CONFIG_DIR` and `AURA_CACHE_DIR` to use different locations (useful
-for tests). `AURA_GOINFRE` overrides the goinfre mount, and `AURA_USE_SYSTEM=1`
-skips the Pixi environment.
+for tests). `AURA_GOINFRE` overrides the goinfre mount,
+`AURA_WALLPAPER_BACKEND` temporarily pins a wallpaper engine, and
+`AURA_USE_SYSTEM=1` skips the Pixi environment.
 
 ## Hooks
 

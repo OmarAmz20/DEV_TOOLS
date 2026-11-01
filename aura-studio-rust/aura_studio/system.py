@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -61,6 +62,7 @@ TOUCHED = [
     ("org.gnome.desktop.background", "picture-options"),
     ("org.gnome.desktop.background", "primary-color"),
     ("org.gnome.desktop.screensaver", "picture-uri"),
+    ("org.gnome.desktop.screensaver", "picture-options"),
 ]
 
 
@@ -79,6 +81,13 @@ def _dconf(*args):
     return _run(["dconf", *args]).stdout.strip()
 
 
+def _dconf_write(path, value):
+    """Write a dconf value and report success instead of guessing from output."""
+    if not shutil.which("dconf"):
+        return False
+    return _run(["dconf", "write", path, str(value)], timeout=8).returncode == 0
+
+
 def _schema(name):
     source = Gio.SettingsSchemaSource.get_default()
     if source is None or source.lookup(name, True) is None:
@@ -92,6 +101,9 @@ def _has_key(settings, key):
 
 
 def _get_string(schema, key, default=""):
+    host = _host_setting_value(schema, key)
+    if isinstance(host, str):
+        return host
     settings = _schema(schema)
     if settings is None or not _has_key(settings, key):
         return default
@@ -102,6 +114,9 @@ def _get_string(schema, key, default=""):
 
 
 def _get_double(schema, key, default=1.0):
+    host = _host_setting_value(schema, key)
+    if isinstance(host, (int, float)) and not isinstance(host, bool):
+        return float(host)
     settings = _schema(schema)
     if settings is None or not _has_key(settings, key):
         return default
@@ -112,6 +127,9 @@ def _get_double(schema, key, default=1.0):
 
 
 def _get_int(schema, key, default=0):
+    host = _host_setting_value(schema, key)
+    if isinstance(host, int) and not isinstance(host, bool):
+        return host
     settings = _schema(schema)
     if settings is None or not _has_key(settings, key):
         return default
@@ -122,14 +140,20 @@ def _get_int(schema, key, default=0):
 
 
 def _set_variant(schema, key, value: GLib.Variant):
+    written = False
     settings = _schema(schema)
-    if settings is None or not _has_key(settings, key) or not settings.is_writable(key):
-        return False
-    try:
-        settings.set_value(key, value)
-        return True
-    except Exception:
-        return False
+    if (settings is not None and _has_key(settings, key)
+            and settings.is_writable(key)):
+        try:
+            settings.set_value(key, value)
+            written = True
+        except Exception:
+            pass
+    # Inside Pixi, Gio may be pointing at an isolated backend.  Writing the
+    # host's dconf as well makes the change visible to gnome-shell and apps.
+    if _host_gsettings_enabled():
+        written = _host_gsettings_set(schema, key, value.print_(True)) or written
+    return written
 
 
 def _set_string(schema, key, value):
@@ -152,6 +176,7 @@ def _sync():
 # --- backend detection ------------------------------------------------------------
 
 _BACKEND = None
+_BACKEND_PREFERENCE = None
 
 
 def _dms_available():
@@ -280,14 +305,80 @@ _DESKTOP_ENV_DROP = {
 }
 
 
-def _desktop_environment():
-    """Keep the helper on the host's GTK 3, not the Pixi GTK 4 stack."""
+def _host_environment():
+    """The host's own tools and settings backend, without the Pixi stack."""
     env = {key: value for key, value in os.environ.items()
            if key not in _DESKTOP_ENV_DROP
            and not key.startswith(("PIXI_", "CONDA_", "MAMBA_"))}
     env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+    env["GSETTINGS_BACKEND"] = "dconf"
+    return env
+
+
+def _desktop_environment():
+    """Keep the helper on the host's GTK 3, not the Pixi GTK 4 stack."""
+    env = _host_environment()
     env["GDK_BACKEND"] = "x11"
     return env
+
+
+def _host_gsettings_enabled():
+    # ``memory`` means a test or an intentionally isolated session.  Never
+    # write the host's dconf database behind the caller's back in that case.
+    return (os.environ.get("GSETTINGS_BACKEND", "").lower() != "memory"
+            and os.path.isfile("/usr/bin/gsettings"))
+
+
+def _host_gsettings(*args, timeout=8):
+    if not _host_gsettings_enabled():
+        return None
+    try:
+        return subprocess.run(["/usr/bin/gsettings", *args],
+                              capture_output=True, text=True, timeout=timeout,
+                              env=_host_environment(), check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _host_gsettings_writable(schema, key):
+    result = _host_gsettings("writable", schema, key)
+    return bool(result is not None and result.returncode == 0
+                and result.stdout.strip().lower() == "true")
+
+
+def _host_gsettings_set(schema, key, value):
+    result = _host_gsettings("set", schema, key, str(value))
+    return bool(result is not None and result.returncode == 0)
+
+
+def _host_gsettings_get(schema, key):
+    result = _host_gsettings("get", schema, key)
+    if result is None or result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.strip()
+
+
+def _host_setting_value(schema, key):
+    text = _host_gsettings_get(schema, key)
+    if text is None:
+        return None
+    try:
+        return GLib.Variant.parse(None, text, None, None).unpack()
+    except Exception:
+        return None
+
+
+def _gnome_set_string(schema, key, value):
+    """Write a GNOME string through Gio and, when possible, the host dconf.
+
+    The second write matters inside the Pixi environment: it guarantees that
+    gnome-shell itself sees the wallpaper even if the bundled GLib stack is
+    using an isolated GSettings backend.
+    """
+    written = _set_string(schema, key, value)
+    if _host_gsettings_enabled():
+        written = _host_gsettings_set(schema, key, value) or written
+    return written
 
 
 def _start_desktop_window(path, mode="fill"):
@@ -320,40 +411,134 @@ def _start_desktop_window(path, mode="fill"):
                            + (f": {'; '.join(details)}" if details else ""))
 
 
-def detect_backend(refresh=False):
-    """The wallpaper backend that is actually usable right now."""
-    global _BACKEND
-    if _BACKEND is not None and not refresh:
-        return _BACKEND
+def _gnome_ready():
     settings = _schema("org.gnome.desktop.background")
-    gnome_ready = bool(settings is not None and settings.is_writable("picture-uri"))
-    if _gnome_session() and gnome_ready:
-        _BACKEND = {"name": "gnome", "label": "GNOME desktop"}
-    elif _dms_available():
-        _BACKEND = {"name": "dms", "label": "DankMaterialShell"}
-    elif _hyprland() and shutil.which("hyprpaper"):
-        _BACKEND = {"name": "hyprpaper", "label": "hyprpaper"}
-    elif _wayland() and _awww_installed():
-        _BACKEND = {"name": "awww", "label": "awww"}
-    elif _wayland() and shutil.which("swaybg"):
-        _BACKEND = {"name": "swaybg", "label": "swaybg"}
-    elif not _wayland() and _gnome_session() and _desktop_window_available():
+    if settings is not None and settings.is_writable("picture-uri"):
+        return True
+    # Installed schema but a Pixi/GSettings backend mismatch: the host's own
+    # gsettings can still be the reliable path.  Skip this in tests and in
+    # explicitly isolated sessions.
+    return _host_gsettings_writable("org.gnome.desktop.background", "picture-uri")
+
+
+def backend_available(name):
+    """Whether one named backend can work in the current session."""
+    if name == "gnome":
+        return _gnome_session() and _gnome_ready()
+    if name == "desktop":
+        return _desktop_window_available()
+    if name == "feh":
+        # GNOME Shell always draws above the X root pixmap, so feh is not a
+        # usable backend there even though the binary is installed.
+        return bool(shutil.which("feh")) and not _wayland() and not _gnome_session()
+    if name == "dms":
+        return _dms_available()
+    if name == "hyprpaper":
+        return _hyprland() and bool(shutil.which("hyprpaper"))
+    if name == "awww":
+        return _wayland() and _awww_installed() and not _gnome_session()
+    if name == "swaybg":
+        return _wayland() and bool(shutil.which("swaybg")) and not _gnome_session()
+    return False
+
+
+def _auto_backend_name(gnome_ready=None):
+    gnome_ready = _gnome_ready() if gnome_ready is None else gnome_ready
+    if _gnome_session():
+        if gnome_ready:
+            return "gnome"
+        # GNOME ignores feh and wlroots daemons.  On Xorg the sticky desktop
+        # window is the only user-level fallback; on Wayland there is none.
+        if not _wayland() and _desktop_window_available():
+            return "desktop"
+        return "none"
+    if _dms_available():
+        return "dms"
+    if _hyprland() and shutil.which("hyprpaper"):
+        return "hyprpaper"
+    if _wayland() and _awww_installed():
+        return "awww"
+    if _wayland() and shutil.which("swaybg"):
+        return "swaybg"
+    if not _wayland() and _gnome_session() and _desktop_window_available():
         # GNOME Shell ignores the X root pixmap.  When its background key is
         # locked, a desktop window is the only user-level way to show a picture.
-        _BACKEND = {"name": "desktop", "label": "X11 desktop window"}
-    elif shutil.which("feh") and not _wayland():
-        _BACKEND = {"name": "feh", "label": "feh"}
-    elif not _wayland() and _desktop_window_available():
-        _BACKEND = {"name": "desktop", "label": "X11 desktop window"}
-    elif gnome_ready:
-        _BACKEND = {"name": "gnome", "label": "GNOME desktop"}
+        return "desktop"
+    if shutil.which("feh") and not _wayland():
+        return "feh"
+    if not _wayland() and _desktop_window_available():
+        return "desktop"
+    if gnome_ready:
+        return "gnome"
+    return "none"
+
+
+def _preferred_backend(preferred=None):
+    # The environment is a deliberate per-launch override, so it wins over
+    # both the saved setting and a config snapshot handed in by the caller.
+    from_environment = os.environ.get("AURA_WALLPAPER_BACKEND", "").strip()
+    if from_environment:
+        return from_environment
+    if preferred and preferred != "auto":
+        return preferred
+    try:
+        return store.load_config().get("wallpaper_backend", "auto")
+    except Exception:
+        return "auto"
+
+
+def detect_backend(refresh=False, preferred=None):
+    """The wallpaper backend that is actually usable right now.
+
+    ``preferred`` (or the ``wallpaper_backend`` setting) pins a backend.  If it
+    is unavailable Aura falls back to automatic detection instead of failing,
+    which keeps Ubuntu sessions working when, for example, gsettings is locked.
+    """
+    global _BACKEND, _BACKEND_PREFERENCE
+    preferred = _preferred_backend(preferred)
+    if preferred not in store.WALLPAPER_BACKENDS:
+        preferred = "auto"
+    if _BACKEND is not None and not refresh and _BACKEND_PREFERENCE == preferred:
+        return _BACKEND
+    gnome_ready = _gnome_ready()
+    automatic = _auto_backend_name(gnome_ready)
+    chosen = automatic
+    if preferred != "auto":
+        if backend_available(preferred):
+            chosen = preferred
+        else:
+            chosen = automatic
+    if chosen == "none":
+        _BACKEND = {"name": "none", "label": "not detected", "preferred": preferred,
+                    "fallback": False}
     else:
-        _BACKEND = {"name": "none", "label": "not detected"}
+        _BACKEND = {
+            "name": chosen,
+            "label": store.WALLPAPER_BACKEND_LABELS.get(chosen, chosen),
+            "preferred": preferred,
+            "fallback": preferred not in ("auto", chosen),
+        }
+    _BACKEND_PREFERENCE = preferred
     return _BACKEND
 
 
 def backend_label():
-    return detect_backend()["label"]
+    backend = detect_backend()
+    if backend.get("fallback"):
+        return f"{backend['label']} (fallback)"
+    return backend["label"]
+
+
+def backend_choices():
+    """Backends suitable for the Look & Feel menu, with an availability mark."""
+    choices = []
+    for name in store.WALLPAPER_BACKENDS:
+        label = store.WALLPAPER_BACKEND_LABELS[name]
+        if name == "auto":
+            choices.append((name, label, True))
+        else:
+            choices.append((name, label, backend_available(name)))
+    return choices
 
 
 def session_label():
@@ -424,7 +609,7 @@ def _wallpaper_mode(mode):
     return mode if mode in store.WALLPAPER_MODES else "fill"
 
 
-def apply_wallpaper(path, mode="fill"):
+def apply_wallpaper(path, mode="fill", preferred=None):
     """Put *path* on the desktop.  Returns details for state.json."""
     path = os.path.realpath(path)
     if not os.path.isfile(path) or not library.is_wallpaper(path):
@@ -439,8 +624,12 @@ def apply_wallpaper(path, mode="fill"):
         applied = still
         from_video = True
 
-    backend = detect_backend(refresh=True)
+    backend = detect_backend(refresh=True, preferred=preferred)
     name = backend["name"]
+    # Snapshot the previous look even when the caller only changes the
+    # wallpaper; this used to be skipped by ``set --no-colors``.
+    with store.locked():
+        _save_originals()
     if name != "desktop":
         _stop_desktop_window()
     if name == "dms":
@@ -488,15 +677,24 @@ def apply_wallpaper(path, mode="fill"):
         _start_desktop_window(applied, mode)
     elif name == "gnome":
         uri = Gio.File.new_for_path(applied).get_uri()
-        if not _set_string("org.gnome.desktop.background", "picture-uri", uri):
+        if not _gnome_set_string("org.gnome.desktop.background", "picture-uri", uri):
             raise RuntimeError("GNOME's wallpaper setting is locked")
-        _set_string("org.gnome.desktop.background", "picture-uri-dark", uri)
-        _set_string("org.gnome.desktop.background", "picture-options",
-                    GNOME_PICTURE_OPTIONS[mode])
+        _gnome_set_string("org.gnome.desktop.background", "picture-uri-dark", uri)
+        _gnome_set_string("org.gnome.desktop.background", "picture-options",
+                          GNOME_PICTURE_OPTIONS[mode])
         _sync()
     else:
+        if _gnome_session():
+            raise RuntimeError(
+                "GNOME's wallpaper setting is locked. Unlock "
+                "org.gnome.desktop.background picture-uri, or run 'aura-studio "
+                "doctor' to see the available backends.")
         raise RuntimeError("no wallpaper backend found (install awww, hyprpaper, "
                            "swaybg, feh, or use an X11 session)")
+
+    with store.locked():
+        _record_applied(dms_wallpapers=_dms_current_wallpapers()
+                        if name == "dms" else None)
 
     return {
         "path": applied,
@@ -504,6 +702,7 @@ def apply_wallpaper(path, mode="fill"):
         "backend": name,
         "mode": mode,
         "from_video": from_video,
+        "fallback": bool(backend.get("fallback")),
     }
 
 
@@ -604,12 +803,30 @@ def cursor_themes():
 
 
 def terminal_targets():
+    """Terminals Aura can write colours for on this machine."""
     targets = []
     if os.path.exists(KITTY_CONF):
         targets.append("kitty")
     if _gnome_terminal():
         targets.append("gnome-terminal")
     return targets
+
+
+def selected_terminal_targets(options=None, config=None):
+    """The detected terminals the user has enabled, in stable order."""
+    available = terminal_targets()
+    if options is not None:
+        chosen = options.get("terminal_targets")
+    else:
+        chosen = (config or store.load_config()).get("terminal_targets")
+    if chosen is None:
+        return available
+    return [target for target in available if target in chosen]
+
+
+def terminal_labels(targets=None):
+    return [store.TERMINAL_TARGET_LABELS.get(target, target)
+            for target in (terminal_targets() if targets is None else targets)]
 
 
 def _gnome_terminal():
@@ -642,6 +859,14 @@ def _launcher_argv():
     if os.path.isfile(LAUNCHER):
         return [LAUNCHER]
     return [sys.executable, "-m", "aura_studio"]
+
+
+def autostart_delay(config=None):
+    config = config or store.load_config()
+    try:
+        return max(0, min(300, int(config.get("autostart_delay", 8))))
+    except (TypeError, ValueError):
+        return 8
 
 
 def autostart_command(profile=None, delay=8, log=True):
@@ -693,39 +918,91 @@ def set_autostart(enabled, profile=None, delay=8):
 
 # --- originals / restore ----------------------------------------------------------
 
+def _settings_snapshot():
+    snapshots = {}
+    for schema, key in TOUCHED:
+        value = _current_setting(schema, key)
+        if value is not None:
+            snapshots[f"{schema} {key}"] = value
+    return snapshots
+
+
+def _terminal_uid():
+    uid_file = os.path.join(store.CONFIG_DIR, "terminal-profile")
+    try:
+        with open(uid_file, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def _terminal_snapshot():
+    return {
+        "default": _dconf("read", f"{TERMINAL}/default"),
+        "list": _dconf("read", f"{TERMINAL}/list"),
+        "uid": _terminal_uid(),
+    }
+
+
+def _record_applied(dms_wallpapers=None):
+    """Remember exactly what Aura wrote, so Restore leaves later edits alone."""
+    originals = store.load_originals()
+    if not originals:
+        return
+    applied = {
+        "settings": _settings_snapshot(),
+        "terminal": _terminal_snapshot(),
+        "saved_at": time.time(),
+    }
+    if dms_wallpapers is not None:
+        applied["dms_wallpapers"] = dms_wallpapers
+    originals["applied"] = applied
+    store.save_originals(originals)
+
+
 def _save_originals():
     if os.path.exists(store.ORIGINALS):
         return
-    snapshots = {}
-    for schema, key in TOUCHED:
-        settings = _schema(schema)
-        if settings is None or not _has_key(settings, key):
-            continue
-        snapshots[f"{schema} {key}"] = settings.get_value(key).print_(True)
-    terminal = {
-        "default": _dconf("read", f"{TERMINAL}/default"),
-        "list": _dconf("read", f"{TERMINAL}/list"),
-    }
     kitty = {"conf": KITTY_CONF, "include_added": False}
     if os.path.exists(KITTY_CONF):
         with contextlib.suppress(OSError):
             with open(KITTY_CONF, encoding="utf-8", errors="replace") as handle:
                 kitty["include_added"] = KITTY_MARKER not in handle.read()
     store.save_originals({
-        "settings": snapshots,
-        "terminal": terminal,
+        "settings": _settings_snapshot(),
+        "terminal": _terminal_snapshot(),
         "kitty": kitty,
         "dms_wallpapers": _dms_current_wallpapers(),
         "saved_at": time.time(),
     })
 
 
+def _current_setting(schema, key):
+    host = _host_gsettings_get(schema, key)
+    if host is not None:
+        return host
+    settings = _schema(schema)
+    if settings is None or not _has_key(settings, key):
+        return None
+    try:
+        return settings.get_value(key).print_(True)
+    except Exception:
+        return None
+
+
 def _restore_settings(originals):
+    applied = (originals.get("applied") or {}).get("settings") or {}
     for name, value in originals.get("settings", {}).items():
         try:
             schema, key = name.split(" ", 1)
         except ValueError:
             continue
+        # With a new-style originals file, only undo values that still belong
+        # to Aura.  A font, wallpaper or theme the user changed afterwards is
+        # intentionally left alone.
+        if applied and name in applied:
+            if _current_setting(schema, key) != applied[name]:
+                continue
         try:
             variant = GLib.Variant.parse(None, value, None, None)
         except Exception:
@@ -733,9 +1010,34 @@ def _restore_settings(originals):
         _set_variant(schema, key, variant)
 
 
+def _terminal_ids(value):
+    return re.findall(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                      r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value or "")
+
+
 def _restore_terminal(originals):
     terminal = originals.get("terminal", {})
-    if terminal:
+    applied = (originals.get("applied") or {}).get("terminal") or {}
+    uid = _terminal_uid()
+    current_default = _dconf("read", f"{TERMINAL}/default")
+    current_list = _dconf("read", f"{TERMINAL}/list")
+
+    if applied:
+        # Only remove our profile from the list, keeping profiles the user
+        # added later.  Only restore the default when it is still ours.
+        if uid and uid in _terminal_ids(current_list):
+            ids = [item for item in _terminal_ids(current_list) if item != uid]
+            if ids:
+                _dconf_write(f"{TERMINAL}/list", str(ids))
+            else:
+                _dconf("reset", f"{TERMINAL}/list")
+        if uid and current_default.strip(" '\"") == uid:
+            if terminal.get("default"):
+                _dconf_write(f"{TERMINAL}/default", terminal["default"])
+            else:
+                _dconf("reset", f"{TERMINAL}/default")
+    elif terminal:
+        # Legacy originals file: preserve the old all-or-nothing behaviour.
         if terminal.get("default"):
             _dconf("write", f"{TERMINAL}/default", terminal["default"])
         else:
@@ -744,15 +1046,12 @@ def _restore_terminal(originals):
             _dconf("write", f"{TERMINAL}/list", terminal["list"])
         else:
             _dconf("reset", f"{TERMINAL}/list")
+
+    if uid:
+        _dconf("reset", "-f", f"{TERMINAL}/:{uid}/")
     uid_file = os.path.join(store.CONFIG_DIR, "terminal-profile")
-    if os.path.exists(uid_file):
-        with contextlib.suppress(OSError):
-            with open(uid_file, encoding="utf-8") as handle:
-                uid = handle.read().strip()
-            if uid:
-                _dconf("reset", "-f", f"{TERMINAL}/:{uid}/")
-        with contextlib.suppress(OSError):
-            os.remove(uid_file)
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(uid_file)
 
 
 def _restore_kitty(originals):
@@ -779,18 +1078,28 @@ def _restore_dms_wallpapers(originals):
     wallpapers = originals.get("dms_wallpapers", {})
     if not wallpapers or not _dms_available():
         return
+    applied = (originals.get("applied") or {}).get("dms_wallpapers")
+    current = _dms_current_wallpapers() if applied else {}
+
+    def owned(key):
+        if not applied:
+            return True
+        return key in applied and current.get(key) == applied.get(key)
+
     global_path = wallpapers.get("__global__")
-    if not wallpapers.get("__per_monitor__") and global_path and os.path.exists(global_path):
+    if (not wallpapers.get("__per_monitor__") and global_path
+            and os.path.exists(global_path) and owned("__global__")):
         _dms_output("wallpaper", "set", global_path)
         return
     screens = _dms_screens()
     restored = False
     for screen in screens:
         path = wallpapers.get(screen)
-        if path and os.path.exists(path):
+        if path and os.path.exists(path) and owned(screen):
             result = _dms_output("wallpaper", "setFor", screen, path)
             restored = restored or "SUCCESS" in result
-    if global_path and os.path.exists(global_path) and not restored:
+    if (global_path and os.path.exists(global_path)
+            and owned("__global__") and not restored):
         _dms_output("wallpaper", "set", global_path)
 
 
@@ -925,12 +1234,11 @@ def _apply_gnome_terminal(p):
     if not _gnome_terminal():
         return False
     uid = _gnome_terminal_uid()
-    listed = _dconf("read", f"{TERMINAL}/list")
-    if uid not in listed:
-        ids = [part.strip(" '") for part in listed.strip("[]").split(",") if part.strip(" '")]
+    ids = _terminal_ids(_dconf("read", f"{TERMINAL}/list"))
+    if uid not in ids:
         ids = ids or ["b1dcc9dd-5262-4d8d-a863-c897e6d979b9"]
-        _dconf("write", f"{TERMINAL}/list", str(ids + [uid]))
-    _dconf("write", f"{TERMINAL}/default", f"'{uid}'")
+        _dconf_write(f"{TERMINAL}/list", str(ids + [uid]))
+    _dconf_write(f"{TERMINAL}/default", f"'{uid}'")
     path = f"{TERMINAL}/:{uid}/"
     values = {
         "visible-name": "'Aura Studio'",
@@ -946,14 +1254,20 @@ def _apply_gnome_terminal(p):
         "highlight-background-color": f"'{p['accent']}'",
         "highlight-foreground-color": f"'{p['on_accent']}'",
     }
+    written = True
     for key, value in values.items():
-        _dconf("write", path + key, value)
-    return True
+        written = _dconf_write(path + key, value) and written
+    return written
 
 
-def _apply_terminal(p):
-    _apply_kitty(p)
-    _apply_gnome_terminal(p)
+def _apply_terminal(p, targets=None):
+    targets = terminal_targets() if targets is None else targets
+    if "kitty" in targets:
+        _apply_kitty(p)
+    if "gnome-terminal" in targets:
+        _apply_gnome_terminal(p)
+    # The snippets are useful even when no terminal is installed: users can
+    # copy them into another terminal or a hook.
     mode_dir = os.path.join(store.EXPORTS, "terminal")
     store.write_text(os.path.join(mode_dir, "kitty.conf"), palette.kitty_theme(p))
     a = p["ansi"]
@@ -961,12 +1275,25 @@ def _apply_terminal(p):
                      "\n".join(f"{i:>2}  {value}" for i, value in enumerate(a)) + "\n")
 
 
+def _user_service_exists(name):
+    if not shutil.which("systemctl"):
+        return False
+    result = _run(["systemctl", "--user", "list-unit-files", name,
+                   "--no-legend", "--no-pager"], timeout=5)
+    return result.returncode == 0 and name in result.stdout
+
+
 def _apply_lock_screen(still):
     if not still or not lock_screen_available():
         return
     uri = Gio.File.new_for_path(still).get_uri()
-    if _set_string("org.gnome.desktop.screensaver", "picture-uri", uri):
-        _run(["systemctl", "--user", "try-restart", "codam-web-greeter.service"], timeout=5)
+    if _gnome_set_string("org.gnome.desktop.screensaver", "picture-uri", uri):
+        _gnome_set_string("org.gnome.desktop.screensaver", "picture-options", "zoom")
+        # Only poke the optional greeter when the unit actually exists; stock
+        # Ubuntu has no codam-web-greeter and systemd would log an error.
+        if _user_service_exists("codam-web-greeter.service"):
+            _run(["systemctl", "--user", "try-restart",
+                  "codam-web-greeter.service"], timeout=5)
 
 
 def _run_hooks(p, mode):
@@ -985,13 +1312,32 @@ def _run_hooks(p, mode):
                              start_new_session=True)
 
 
+def custom_css_text():
+    """Optional user CSS appended to every generated theme."""
+    try:
+        if os.path.getsize(store.CUSTOM_CSS) > 256_000:
+            return ""
+        with open(store.CUSTOM_CSS, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
 def apply_theme(p, mode, options, still=None):
     """Apply a palette (both modes, or one mode) and the chosen desktop options."""
     dark = mode == "dark"
     colours = p.get(mode, p) if isinstance(p, dict) else p
     if not palette.valid_mode(colours):
         raise ValueError("invalid palette colours")
-    css = palette.gtk_css(colours, dark, bool(options.get("glass")))
+    try:
+        opacity = max(0.15, min(1.0, float(options.get("glass_opacity", 0.72))))
+    except (TypeError, ValueError):
+        opacity = 0.72
+    css = palette.gtk_css(colours, dark, bool(options.get("glass")), opacity)
+    custom = custom_css_text().strip()
+    if custom:
+        css += ("\n/* --- custom.css from " + store.CUSTOM_CSS +
+                " (yours; Aura leaves it in place) --- */\n" + custom + "\n")
     with store.locked():
         _save_originals()
         if options.get("recolour_gtk", True):
@@ -1005,10 +1351,11 @@ def apply_theme(p, mode, options, still=None):
             _set_string("org.gnome.desktop.background", "primary-color", colours["paper"])
         _apply_desktop_options(options)
         if options.get("terminal", True):
-            _apply_terminal(colours)
+            _apply_terminal(colours, selected_terminal_targets(options))
         if options.get("lock_screen", False):
             _apply_lock_screen(still)
         _sync()
+        _record_applied()
     _run_hooks(colours, mode)
     return css
 
@@ -1068,8 +1415,12 @@ def app_theme_css():
 def status():
     state = store.load_state()
     config = store.load_config()
+    backend = detect_backend(refresh=True)
     return {
         "backend": backend_label(),
+        "backend_name": backend["name"],
+        "backend_preference": config.get("wallpaper_backend", "auto"),
+        "backend_fallback": bool(backend.get("fallback")),
         "session": session_label(),
         "session_type": "wayland" if _wayland() else "x11",
         "wallpaper": state.get("wallpaper"),
@@ -1081,9 +1432,13 @@ def status():
         "slideshow_order": config.get("slideshow_order", "shuffle"),
         "themes": OUR_THEMES,
         "terminal": terminal_targets(),
+        "terminal_selected": selected_terminal_targets(config=config),
         "lock_screen": lock_screen_available(),
         "autostart": autostart_enabled(),
         "autostart_profile": config.get("autostart_profile"),
+        "autostart_delay": autostart_delay(config),
+        "custom_css": store.CUSTOM_CSS,
+        "custom_css_exists": os.path.exists(store.CUSTOM_CSS),
         "config_dir": store.CONFIG_DIR,
         "cache_dir": store.CACHE_DIR,
         "goinfre": store.GOINFRE,

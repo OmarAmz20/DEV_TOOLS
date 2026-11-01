@@ -44,6 +44,8 @@ class WallpaperWindow:
         self.scaled_size = (0, 0)
         self._x11 = None
         self._display = None
+        self._workspace = None
+        self._ticks = 0
 
         self.window = Gtk.Window(title="Aura Studio wallpaper")
         self.window.set_decorated(False)
@@ -51,11 +53,14 @@ class WallpaperWindow:
         self.window.set_skip_taskbar_hint(True)
         self.window.set_skip_pager_hint(True)
         self.window.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
+        self.window.set_keep_below(True)
         self.window.set_accept_focus(False)
         self.window.set_focus_on_map(False)
         self.window.move(0, 0)
         self.window.connect("destroy", Gtk.main_quit)
+        self.window.connect("map-event", self._on_map)
         self.window.connect("screen-changed", self._screen_changed)
+        self._connect_workspace_signal()
 
         self.area = Gtk.DrawingArea()
         self.area.set_hexpand(True)
@@ -66,10 +71,12 @@ class WallpaperWindow:
         self._resize_to_screen()
         self.window.show_all()
         # GNOME Shell 42 only honours sticky for an already-mapped window.
-        GLib.timeout_add(500, self._stick)
-        GLib.timeout_add(1000, self._lower)
-        GLib.timeout_add(2000, self._lower)
-        GLib.timeout_add_seconds(1, self._lower)
+        GLib.timeout_add(300, self._stick)
+        GLib.timeout_add(800, self._stick)
+        GLib.timeout_add(1500, self._stick)
+        # Poll a few times a second so a workspace switch is followed quickly;
+        # lowering is throttled separately to avoid needless X traffic.
+        GLib.timeout_add(250, self._maintain)
 
     def _screen(self):
         return self.window.get_screen() or Gdk.Screen.get_default()
@@ -84,17 +91,106 @@ class WallpaperWindow:
             self.window.move(0, 0)
             self.area.set_size_request(width, height)
 
+    def _connect_workspace_signal(self):
+        screen = self._screen()
+        if screen is None:
+            return
+        try:
+            screen.connect("workspace-changed", self._on_workspace_changed)
+        except (TypeError, AttributeError):
+            pass
+
     def _screen_changed(self, _window, _old_screen):
         self._resize_to_screen()
+        self._connect_workspace_signal()
         GLib.timeout_add(300, self._stick)
         GLib.timeout_add(300, self._lower)
         return False
 
-    def _stick(self):
-        if self.window.get_window() is not None:
-            self.window.stick()
-            self._lower()
+    def _on_map(self, *_args):
+        self._stick()
         return False
+
+    def _on_workspace_changed(self, *_args):
+        self._stick()
+        return False
+
+    def _maintain(self):
+        """Keep the window on every workspace while the session is alive."""
+        screen = self._screen()
+        workspace = None
+        if screen is not None:
+            try:
+                workspace = screen.get_active_workspace().get_number()
+            except AttributeError:
+                workspace = None
+        if workspace != self._workspace:
+            self._workspace = workspace
+            self._ticks = 0
+            self._stick()
+        else:
+            self._ticks += 1
+            if self._ticks % 8 == 0:
+                self._lower()
+        return True
+
+    def _stick(self):
+        gdk_window = self.window.get_window()
+        if gdk_window is None:
+            return False
+        self.window.stick()
+        self._set_all_desktops(gdk_window)
+        self._lower()
+        return False
+
+    def _init_x11(self):
+        if self._x11 is not None:
+            return bool(self._display)
+        try:
+            x11 = ctypes.CDLL("libX11.so.6")
+            x11.XOpenDisplay.restype = ctypes.c_void_p
+            x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x11.XInternAtom.restype = ctypes.c_ulong
+            x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+            x11.XChangeProperty.restype = ctypes.c_int
+            x11.XChangeProperty.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong,
+                ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+            x11.XLowerWindow.restype = ctypes.c_int
+            x11.XLowerWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            x11.XFlush.restype = ctypes.c_int
+            x11.XFlush.argtypes = [ctypes.c_void_p]
+            self._x11 = x11
+            self._display = x11.XOpenDisplay(None)
+        except Exception:
+            self._x11 = None
+            self._display = None
+        return bool(self._display)
+
+    def _set_all_desktops(self, gdk_window):
+        """Also ask the WM directly; stick() alone is unreliable on GNOME 42."""
+        if not self._init_x11():
+            return
+        display = self._display
+        xid = gdk_window.get_xid()
+        try:
+            # _NET_WM_DESKTOP = 0xFFFFFFFF means "all workspaces".
+            desktop_atom = self._x11.XInternAtom(display, b"_NET_WM_DESKTOP", False)
+            value = ctypes.c_ulong(0xFFFFFFFF)
+            self._x11.XChangeProperty(
+                display, xid, desktop_atom, 6, 32, 0,  # XA_CARDINAL
+                ctypes.byref(value), 1)
+            names = (b"_NET_WM_STATE_STICKY", b"_NET_WM_STATE_BELOW",
+                     b"_NET_WM_STATE_SKIP_TASKBAR", b"_NET_WM_STATE_SKIP_PAGER")
+            atoms = (ctypes.c_ulong * len(names))(
+                *[self._x11.XInternAtom(display, name, False) for name in names])
+            state_atom = self._x11.XInternAtom(display, b"_NET_WM_STATE", False)
+            self._x11.XChangeProperty(
+                display, xid, state_atom, 4, 32, 0,  # XA_ATOM
+                atoms, len(names))
+            self._x11.XFlush(display)
+        except Exception:
+            pass
 
     def _cover(self, width, height):
         if width <= 0 or height <= 0:
@@ -202,21 +298,11 @@ class WallpaperWindow:
 
     def _lower(self):
         gdk_window = self.window.get_window()
-        if gdk_window is None:
+        if gdk_window is None or not self._init_x11():
             return True
         try:
-            if self._x11 is None:
-                self._x11 = ctypes.CDLL("libX11.so.6")
-                self._x11.XOpenDisplay.restype = ctypes.c_void_p
-                self._x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-                self._x11.XLowerWindow.restype = ctypes.c_int
-                self._x11.XLowerWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-                self._x11.XFlush.restype = ctypes.c_int
-                self._x11.XFlush.argtypes = [ctypes.c_void_p]
-                self._display = self._x11.XOpenDisplay(None)
-            if self._display:
-                self._x11.XLowerWindow(self._display, gdk_window.get_xid())
-                self._x11.XFlush(self._display)
+            self._x11.XLowerWindow(self._display, gdk_window.get_xid())
+            self._x11.XFlush(self._display)
         except Exception:
             pass
         return True

@@ -85,6 +85,44 @@ class SystemTest(unittest.TestCase):
         self.assertFalse(os.path.exists(store.ORIGINALS))
         self.assertEqual(store.load_state(), {})
 
+    def test_custom_css_is_appended_and_kept_on_restore(self):
+        self.addCleanup(system.restore)
+        self.addCleanup(lambda: os.path.exists(store.CUSTOM_CSS) and
+                        os.remove(store.CUSTOM_CSS))
+        store.write_text(store.CUSTOM_CSS, ".my-extra { border-radius: 3px; }")
+        config = store.load_config()
+        options = {key: config.get(key) for key in core.OPTION_KEYS}
+        options.update({"terminal": False, "lock_screen": False, "glass": True})
+        system.apply_theme(self.value["dark"], "dark", options, still=self.image)
+        with open(store.THEME_CSS, encoding="utf-8") as handle:
+            self.assertIn(".my-extra", handle.read())
+        self.assertTrue(os.path.exists(store.CUSTOM_CSS))
+        system.restore()
+        self.assertTrue(os.path.exists(store.CUSTOM_CSS))
+
+    def test_restore_does_not_clobber_a_later_theme_change(self):
+        original = system._get_string("org.gnome.desktop.interface", "gtk-theme")
+        try:
+            config = store.load_config()
+            options = {key: config.get(key) for key in core.OPTION_KEYS}
+            options.update({"terminal": False, "lock_screen": False})
+            system.apply_theme(self.value["dark"], "dark", options, still=self.image)
+            applied = system._get_string("org.gnome.desktop.interface", "gtk-theme")
+            self.assertIn(applied, system.OUR_THEMES)
+            system._set_string("org.gnome.desktop.interface", "gtk-theme", "UserChosenTheme")
+            system._sync()
+            system.restore()
+            self.assertEqual(
+                system._get_string("org.gnome.desktop.interface", "gtk-theme", ""),
+                "UserChosenTheme")
+        finally:
+            system._set_string("org.gnome.desktop.interface", "gtk-theme",
+                               original or "Adwaita")
+            system._sync()
+            with __import__("contextlib").suppress(FileNotFoundError):
+                os.remove(store.ORIGINALS)
+            store.save_state({})
+
     def test_apply_without_gtk_recolour(self):
         config = store.load_config()
         options = {key: config.get(key) for key in
@@ -195,6 +233,13 @@ class AutostartTest(unittest.TestCase):
     def tearDown(self):
         system.set_autostart(False)
 
+    def test_login_entry_uses_the_configured_delay(self):
+        system.set_autostart(True, profile="my-profile", delay=23)
+        with open(system.AUTOSTART_FILE, encoding="utf-8") as handle:
+            entry = handle.read()
+        self.assertIn("--delay 23", entry)
+        system.set_autostart(False)
+
     def test_login_entry_reapplies_the_saved_look(self):
         system.set_autostart(True, profile="my-profile")
         self.assertTrue(system.autostart_enabled())
@@ -247,6 +292,61 @@ class BackendTest(unittest.TestCase):
             session = system.session_label()
         self.assertEqual(result["name"], "feh")
         self.assertIn("X11", session)
+
+    def test_a_pinned_backend_overrides_automatic_detection(self):
+        with mock.patch.dict(os.environ, {
+                "XDG_CURRENT_DESKTOP": "XFCE",
+                "XDG_SESSION_TYPE": "x11",
+                "DISPLAY": ":0",
+                "WAYLAND_DISPLAY": ""}, clear=False), \
+                mock.patch.object(system, "_schema", return_value=FakeSettings(False)), \
+                mock.patch.object(system, "_dms_available", return_value=False), \
+                mock.patch.object(system, "_hyprland", return_value=False), \
+                mock.patch.object(system, "_wayland", return_value=False), \
+                mock.patch.object(system, "_desktop_window_available", return_value=True), \
+                mock.patch.object(system.shutil, "which",
+                                  side_effect=lambda name: "/usr/bin/feh" if name == "feh" else None):
+            result = system.detect_backend(refresh=True, preferred="desktop")
+        self.assertEqual(result["name"], "desktop")
+        self.assertFalse(result["fallback"])
+
+    def test_gnome_can_use_host_gsettings_when_gio_is_isolated(self):
+        with mock.patch.dict(os.environ, {
+                "XDG_CURRENT_DESKTOP": "ubuntu:GNOME",
+                "XDG_SESSION_TYPE": "x11",
+                "DISPLAY": ":0",
+                "WAYLAND_DISPLAY": ""}, clear=False), \
+                mock.patch.object(system, "_schema", return_value=None), \
+                mock.patch.object(system, "_host_gsettings_writable", return_value=True), \
+                mock.patch.object(system, "_dms_available", return_value=False), \
+                mock.patch.object(system, "_hyprland", return_value=False), \
+                mock.patch.object(system, "_wayland", return_value=False):
+            result = system.detect_backend(refresh=True)
+        self.assertEqual(result["name"], "gnome")
+
+    def test_gnome_strings_also_reach_the_host_backend(self):
+        with mock.patch.object(system, "_set_string", return_value=False), \
+                mock.patch.object(system, "_host_gsettings_enabled", return_value=True), \
+                mock.patch.object(system, "_host_gsettings_set", return_value=True) as host_set:
+            ok = system._gnome_set_string("org.gnome.desktop.background",
+                                          "picture-uri", "file:///wall.png")
+        self.assertTrue(ok)
+        host_set.assert_called_once_with("org.gnome.desktop.background",
+                                         "picture-uri", "file:///wall.png")
+
+    def test_unavailable_pinned_backend_falls_back(self):
+        with mock.patch.dict(os.environ, {
+                "XDG_CURRENT_DESKTOP": "ubuntu:GNOME",
+                "XDG_SESSION_TYPE": "x11",
+                "DISPLAY": ":0",
+                "WAYLAND_DISPLAY": ""}, clear=False), \
+                mock.patch.object(system, "_schema", return_value=FakeSettings(True)), \
+                mock.patch.object(system, "_dms_available", return_value=False), \
+                mock.patch.object(system, "_hyprland", return_value=False), \
+                mock.patch.object(system, "_wayland", return_value=False):
+            result = system.detect_backend(refresh=True, preferred="awww")
+        self.assertEqual(result["name"], "gnome")
+        self.assertTrue(result["fallback"])
 
     def test_locked_gnome_x11_uses_desktop_window(self):
         with mock.patch.dict(os.environ, {
@@ -327,6 +427,47 @@ class NextPathTest(unittest.TestCase):
     def test_sequential_starts_at_the_first_wallpaper(self):
         paths = ["/p/b.png", "/p/a.png"]
         self.assertEqual(library.next_path(paths, None, "sequential"), "/p/a.png")
+
+
+class ConfigTest(unittest.TestCase):
+    def test_invalid_values_are_normalised(self):
+        original = store.load_config()
+        try:
+            store.write_json(store.CONFIG, {
+                "glass": "false",
+                "glass_opacity": 9,
+                "wallpaper_backend": "magic",
+                "terminal_targets": ["kitty", "unknown", "kitty"],
+                "autostart_delay": -5,
+                "slide_minutes": "many",
+                "accent": "red",
+            })
+            config = store.load_config()
+            self.assertFalse(config["glass"])
+            self.assertEqual(config["glass_opacity"], 1.0)
+            self.assertEqual(config["wallpaper_backend"], "auto")
+            self.assertEqual(config["terminal_targets"], ["kitty"])
+            self.assertEqual(config["autostart_delay"], 0)
+            self.assertEqual(config["slide_minutes"], 0)
+            self.assertIsNone(config["accent"])
+        finally:
+            store.write_json(store.CONFIG, original)
+
+    def test_terminal_targets_can_be_limited(self):
+        with mock.patch.object(system, "terminal_targets",
+                               return_value=["kitty", "gnome-terminal"]):
+            self.assertEqual(
+                system.selected_terminal_targets({"terminal_targets": ["kitty"]}),
+                ["kitty"])
+            self.assertEqual(
+                system.selected_terminal_targets({"terminal_targets": []}), [])
+            self.assertEqual(
+                system.selected_terminal_targets({"terminal_targets": None}),
+                ["kitty", "gnome-terminal"])
+            self.assertEqual(
+                system.selected_terminal_targets({"terminal_targets": ["kitty"]},
+                                                 config={}),
+                ["kitty"])
 
 
 if __name__ == "__main__":

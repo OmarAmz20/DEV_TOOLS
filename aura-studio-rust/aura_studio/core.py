@@ -7,8 +7,9 @@ import time
 from . import library, palette as palette_module, store, system
 
 OPTION_KEYS = (
-    "glass", "recolour_gtk", "terminal", "lock_screen", "icon_theme",
-    "cursor_theme", "cursor_size", "font", "mono_font", "text_scale",
+    "glass", "glass_opacity", "recolour_gtk", "terminal", "terminal_targets",
+    "lock_screen", "icon_theme", "cursor_theme", "cursor_size", "font",
+    "mono_font", "text_scale",
 )
 
 
@@ -73,7 +74,9 @@ def apply_wallpaper(path, config=None, palette_value=None, match_colors=None):
         still = library.still_for(path, 1920) or path
         applied_palette = palette_value or palette_module.from_image(
             still, config.get("style", "balanced"), config.get("accent"))
-    result = system.apply_wallpaper(path, mode=config.get("wallpaper_mode", "fill"))
+    result = system.apply_wallpaper(
+        path, mode=config.get("wallpaper_mode", "fill"),
+        preferred=config.get("wallpaper_backend", "auto"))
     if applied_palette:
         system.apply_theme(applied_palette, mode, config, still=result["path"] or path)
     options = options_snapshot(config)
@@ -117,7 +120,9 @@ def apply_profile(profile):
     wallpaper_mode = profile.get("wallpaper_mode", config.get("wallpaper_mode", "fill"))
     result = None
     if wallpaper and os.path.isfile(wallpaper) and library.is_wallpaper(wallpaper):
-        result = system.apply_wallpaper(os.path.realpath(wallpaper), mode=wallpaper_mode)
+        result = system.apply_wallpaper(
+            os.path.realpath(wallpaper), mode=wallpaper_mode,
+            preferred=config.get("wallpaper_backend", "auto"))
         wallpaper = os.path.realpath(wallpaper)
 
     mode_setting = profile.get("mode", "auto")

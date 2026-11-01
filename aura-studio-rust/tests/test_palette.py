@@ -120,6 +120,12 @@ class PaletteTest(unittest.TestCase):
                 provider = Gtk.CssProvider()
                 provider.load_from_data(palette.gtk_css(value[mode], mode == "dark", glass).encode())
 
+    def test_glass_opacity_is_configurable(self):
+        value = palette.from_image(self.image)
+        css = palette.gtk_css(value["dark"], True, True, 0.35)
+        self.assertIn("alpha(@window_bg_color, 0.35)", css)
+        self.assertNotIn("alpha(@window_bg_color, 0.72)", css)
+
     def test_json_export_shape(self):
         value = palette.from_image(self.image, "muted")
         exported = palette.palette_json(value)

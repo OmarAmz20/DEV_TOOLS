@@ -134,7 +134,8 @@ class ProfilesPage(Gtk.Box):
     def use_at_login(self, profile):
         store.save_config(autostart_profile=profile["id"])
         try:
-            system.set_autostart(True, profile=profile["id"])
+            system.set_autostart(True, profile=profile["id"],
+                                 delay=self.win.config.get("autostart_delay", 8))
         except OSError as error:
             self.win.toast(f"Could not update the login entry: {error}")
             return
@@ -254,7 +255,8 @@ class ProfilesPage(Gtk.Box):
                     store.save_config(autostart_profile=None)
                     self.win.reload_config()
                     if system.autostart_enabled():
-                        system.set_autostart(True)
+                        system.set_autostart(
+                            True, delay=self.win.config.get("autostart_delay", 8))
                     self.win.look_page.sync_from_config()
                 self.rebuild()
                 self.win.toast("Profile deleted")

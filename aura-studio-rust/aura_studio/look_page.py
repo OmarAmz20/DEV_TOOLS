@@ -49,6 +49,7 @@ class LookPage(Gtk.Box):
         self.build_targets()
         self.build_desktop()
         self.build_wallpaper()
+        self.build_advanced()
         self.build_session()
         self.build_apply()
         self.sync_from_config()
@@ -136,10 +137,20 @@ class LookPage(Gtk.Box):
         targets = system.terminal_targets()
         self.terminal_switch = self._switch_row(
             group, "Terminal colours",
-            "GNOME Terminal profile and Kitty theme." if targets else "No supported terminal found.",
+            "Colours for " + ", ".join(system.terminal_labels(targets)) + "."
+            if targets else "No supported terminal found.",
             "terminal")
         if not targets:
             self.terminal_switch.set_sensitive(False)
+        self.terminal_rows = {}
+        for target in targets:
+            row = Adw.SwitchRow(
+                title=store.TERMINAL_TARGET_LABELS.get(target, target),
+                subtitle="Write an Aura colour profile for this terminal.")
+            row.set_active(True)
+            row.connect("notify::active", self.on_terminal_target, target)
+            group.add(row)
+            self.terminal_rows[target] = row
         self.lock_switch = self._switch_row(
             group, "Lock screen",
             "Uses the wallpaper on the GNOME lock screen."
@@ -151,6 +162,29 @@ class LookPage(Gtk.Box):
         self.glass_switch = self._switch_row(
             group, "See-through windows",
             "Let the wallpaper show through app windows. Menus stay solid.", "glass")
+        self.opacity_row = Adw.ActionRow(
+            title="Window opacity",
+            subtitle="How much of the wallpaper shows through.")
+
+        def opacity_changed(scale):
+            percent = round(scale.get_value() * 100)
+            self.opacity_label.set_label(f"{percent}%")
+            if not self.updating:
+                self.win.save_config(glass_opacity=round(scale.get_value(), 2))
+
+        self.opacity_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0.20, 0.95, 0.05)
+        self.opacity_scale.set_size_request(170, -1)
+        self.opacity_scale.set_draw_value(False)
+        self.opacity_scale.set_valign(Gtk.Align.CENTER)
+        self.opacity_scale.connect("value-changed", opacity_changed)
+        self.opacity_label = Gtk.Label(label="72%", width_chars=5, xalign=1)
+        self.opacity_label.add_css_class("aura-hint")
+        box = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+        box.append(self.opacity_scale)
+        box.append(self.opacity_label)
+        self.opacity_row.add_suffix(box)
+        group.add(self.opacity_row)
         self.page.append(group)
 
     def _switch_row(self, group, title, subtitle, key):
@@ -171,8 +205,9 @@ class LookPage(Gtk.Box):
         self.cursors_combo, self.cursor_values = self._theme_combo(
             group, "Cursor theme", system.cursor_themes(), preferences["cursor_theme"], "cursor_theme")
 
-        self.cursor_size_values = [None, 24, 32, 48, 64]
-        cursor_labels = ["System default", "24 px", "32 px", "48 px", "64 px"]
+        self.cursor_size_values = [None, 24, 32, 48, 64, 96, 128]
+        cursor_labels = ["System default", "24 px", "32 px", "48 px", "64 px",
+                         "96 px", "128 px"]
         current_size = self.win.config.get("cursor_size")
         if current_size is not None and current_size not in self.cursor_size_values:
             self.cursor_size_values.append(current_size)
@@ -189,7 +224,7 @@ class LookPage(Gtk.Box):
 
         self.scale_row = Adw.ActionRow(title="Text size",
                                        subtitle="Scales text in GTK apps")
-        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.8, 1.5, 0.05)
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.75, 2.0, 0.05)
         self.scale.set_size_request(170, -1)
         self.scale.set_draw_value(False)
         self.scale.add_mark(1.0, Gtk.PositionType.BOTTOM, None)
@@ -243,6 +278,23 @@ class LookPage(Gtk.Box):
         group = Adw.PreferencesGroup(
             title="Wallpaper",
             description="How pictures sit on the screen, and how they change over time.")
+        self.backend_values = []
+        backend_labels = []
+        for name, label, available in system.backend_choices():
+            self.backend_values.append(name)
+            if name == "auto":
+                backend_labels.append(f"{label} — currently {system.backend_label()}")
+            elif available:
+                backend_labels.append(label)
+            else:
+                backend_labels.append(f"{label} (not available now)")
+        self.backend_row = Adw.ComboRow(
+            title="Wallpaper engine",
+            subtitle="Pin one backend if automatic detection picks the wrong one.",
+            model=Gtk.StringList.new(backend_labels))
+        self.backend_row.connect("notify::selected", self.on_backend)
+        group.add(self.backend_row)
+
         self.wallpaper_mode_values = list(store.WALLPAPER_MODES)
         self.wallpaper_mode_row = Adw.ComboRow(
             title="Scaling",
@@ -252,11 +304,14 @@ class LookPage(Gtk.Box):
         self.wallpaper_mode_row.connect("notify::selected", self.on_wallpaper_mode)
         group.add(self.wallpaper_mode_row)
 
-        self.slide_row = Adw.ComboRow(
-            title="Change wallpaper",
-            subtitle="Runs while Aura is open and picks from your folder.",
-            model=Gtk.StringList.new([label for _minutes, label in SLIDE_CHOICES]))
-        self.slide_row.connect("notify::selected", self.on_slide_choice)
+        self.slide_row = Adw.SpinRow.new(
+            Gtk.Adjustment(value=0, lower=0, upper=10080,
+                           step_increment=5, page_increment=60), 5, 0)
+        self.slide_row.set_title("Change wallpaper")
+        self.slide_row.set_subtitle(
+            "Minutes between changes; 0 turns the slideshow off. "
+            "Runs while Aura is open.")
+        self.slide_row.connect("notify::value", self.on_slide_choice)
         group.add(self.slide_row)
 
         self.slideshow_order_values = list(store.SLIDESHOW_ORDERS)
@@ -278,6 +333,32 @@ class LookPage(Gtk.Box):
         group.add(shuffle_row)
         self.page.append(group)
 
+    def build_advanced(self):
+        group = Adw.PreferencesGroup(
+            title="Finishing touches",
+            description="Optional extras for people who want more control.")
+        css_row = Adw.ActionRow(
+            title="Custom stylesheet",
+            subtitle=f"{store.CUSTOM_CSS} — appended to Aura's generated GTK theme.")
+        css_row.set_tooltip_text(store.CUSTOM_CSS)
+        open_css = Gtk.Button(label="Open…", valign=Gtk.Align.CENTER,
+                              css_classes=["flat"])
+        open_css.connect("clicked", lambda _b: self.win.open_custom_css())
+        css_row.add_suffix(open_css)
+        css_row.set_activatable_widget(open_css)
+        group.add(css_row)
+
+        self.hooks_row = Adw.ActionRow(
+            title="Recolour hooks",
+            subtitle="Scripts in this folder run after each recolour.")
+        open_hooks = Gtk.Button(label="Open folder", valign=Gtk.Align.CENTER,
+                                css_classes=["flat"])
+        open_hooks.connect("clicked", lambda _b: self.win.open_hooks_folder())
+        self.hooks_row.add_suffix(open_hooks)
+        self.hooks_row.set_activatable_widget(open_hooks)
+        group.add(self.hooks_row)
+        self.page.append(group)
+
     def build_session(self):
         group = Adw.PreferencesGroup(
             title="At login",
@@ -288,6 +369,15 @@ class LookPage(Gtk.Box):
                      "No window is opened.")
         self.login_switch.connect("notify::active", self.on_login_switch)
         group.add(self.login_switch)
+
+        self.login_delay_row = Adw.SpinRow.new(
+            Gtk.Adjustment(value=8, lower=0, upper=300, step_increment=1,
+                           page_increment=10), 1, 0)
+        self.login_delay_row.set_title("Wait before reapplying")
+        self.login_delay_row.set_subtitle(
+            "Seconds after login, so the desktop has finished starting.")
+        self.login_delay_row.connect("notify::value", self.on_login_delay)
+        group.add(self.login_delay_row)
 
         self.login_look_values = [None]
         self.login_look_labels = ["Last applied look"]
@@ -368,6 +458,53 @@ class LookPage(Gtk.Box):
         if self.updating:
             return
         self.win.save_config(**{key: row.get_active()})
+        if key == "glass":
+            self.opacity_row.set_sensitive(row.get_active())
+        elif key == "terminal":
+            for target_row in self.terminal_rows.values():
+                target_row.set_sensitive(row.get_active())
+
+    def on_terminal_target(self, row, _param, target):
+        if self.updating:
+            return
+        current = self.win.config.get("terminal_targets")
+        selected = list(system.terminal_targets() if current is None else current)
+        if row.get_active():
+            if target not in selected:
+                selected.append(target)
+        else:
+            selected = [item for item in selected if item != target]
+        self.win.save_config(terminal_targets=selected)
+
+    def on_backend(self, combo, _param):
+        if self.updating:
+            return
+        index = combo.get_selected()
+        if not (0 <= index < len(self.backend_values)):
+            return
+        name = self.backend_values[index]
+        self.win.save_config(wallpaper_backend=name)
+        backend = system.detect_backend(refresh=True)
+        self.win.update_sidebar_footer()
+        self.refresh_status()
+        if backend.get("fallback"):
+            self.win.toast(
+                f"{store.WALLPAPER_BACKEND_LABELS.get(name, name)} is not available; "
+                f"using {backend['label']} instead.")
+        else:
+            self.win.toast(f"Wallpaper engine: {backend['label']}")
+
+    def on_login_delay(self, row, _param):
+        if self.updating:
+            return
+        self.win.save_config(autostart_delay=int(round(row.get_value())))
+        if system.autostart_enabled():
+            try:
+                system.set_autostart(
+                    True, profile=self.win.config.get("autostart_profile"),
+                    delay=self.win.config["autostart_delay"])
+            except OSError as error:
+                self.win.toast(f"Could not update the login entry: {error}")
 
     def on_theme_combo(self, combo, _param, key, values):
         if self.updating:
@@ -404,7 +541,9 @@ class LookPage(Gtk.Box):
             return
         enabled = row.get_active()
         try:
-            system.set_autostart(enabled, profile=self.win.config.get("autostart_profile"))
+            system.set_autostart(
+                enabled, profile=self.win.config.get("autostart_profile"),
+                delay=self.win.config.get("autostart_delay", 8))
         except OSError as error:
             self.updating = True
             try:
@@ -430,7 +569,9 @@ class LookPage(Gtk.Box):
         self.win.save_config(autostart_profile=value)
         if system.autostart_enabled():
             try:
-                system.set_autostart(True, profile=value)
+                system.set_autostart(
+                    True, profile=value,
+                    delay=self.win.config.get("autostart_delay", 8))
             except OSError as error:
                 self.win.toast(f"Could not update the login entry: {error}")
                 return
@@ -468,14 +609,14 @@ class LookPage(Gtk.Box):
             return
         self.win.save_config(text_scale=value)
 
-    def on_slide_choice(self, combo, _param):
+    def on_slide_choice(self, row, _param):
         if self.updating:
             return
-        index = combo.get_selected()
-        if 0 <= index < len(SLIDE_CHOICES):
-            minutes = SLIDE_CHOICES[index][0]
-            self.win.save_config(slide_minutes=minutes)
-            self.win.slideshow_changed()
+        minutes = max(0, int(round(row.get_value())))
+        if minutes == self.win.config.get("slide_minutes"):
+            return
+        self.win.save_config(slide_minutes=minutes)
+        self.win.slideshow_changed()
 
     # --- syncing -------------------------------------------------------------------
 
@@ -506,6 +647,15 @@ class LookPage(Gtk.Box):
             self.terminal_switch.set_active(bool(config["terminal"]))
             self.lock_switch.set_active(bool(config["lock_screen"]))
             self.glass_switch.set_active(bool(config["glass"]))
+            self.opacity_row.set_sensitive(bool(config["glass"]))
+            opacity = float(config.get("glass_opacity", 0.72))
+            self.opacity_scale.set_value(opacity)
+            self.opacity_label.set_label(f"{opacity * 100:.0f}%")
+
+            selected_targets = config.get("terminal_targets")
+            for target, row in self.terminal_rows.items():
+                row.set_active(selected_targets is None or target in selected_targets)
+                row.set_sensitive(bool(config["terminal"]))
 
             for combo, values, key in (
                     (self.icons_combo, self.icon_values, "icon_theme"),
@@ -513,6 +663,11 @@ class LookPage(Gtk.Box):
                     (self.cursor_size_row, self.cursor_size_values, "cursor_size")):
                 value = config.get(key)
                 combo.set_selected(values.index(value) if value in values else 0)
+
+            backend = config.get("wallpaper_backend", "auto")
+            self.backend_row.set_selected(
+                self.backend_values.index(backend)
+                if backend in self.backend_values else 0)
 
             mode = config.get("wallpaper_mode", "fill")
             self.wallpaper_mode_row.set_selected(
@@ -534,10 +689,8 @@ class LookPage(Gtk.Box):
             self.scale.set_value(float(scale))
             self.scale_label.set_label(f"{float(scale) * 100:.0f}%")
 
-            minutes = config.get("slide_minutes", 0)
-            values = [value for value, _label in SLIDE_CHOICES]
-            self.slide_row.set_selected(values.index(minutes) if minutes in values else 0)
-
+            self.slide_row.set_value(int(config.get("slide_minutes", 0)))
+            self.login_delay_row.set_value(int(config.get("autostart_delay", 8)))
             self.login_switch.set_active(system.autostart_enabled())
             self._sync_login_looks(config.get("autostart_profile"))
         finally:

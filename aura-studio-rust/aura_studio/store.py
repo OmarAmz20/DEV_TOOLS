@@ -57,6 +57,7 @@ CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
 ORIGINALS = os.path.join(CONFIG_DIR, "originals.json")
 THEME_CSS = os.path.join(CONFIG_DIR, "theme.css")
+CUSTOM_CSS = os.path.join(CONFIG_DIR, "custom.css")
 HOOKS = os.path.join(CONFIG_DIR, "hooks")
 PROFILES = os.path.join(CONFIG_DIR, "profiles")
 LOCK = os.path.join(CONFIG_DIR, ".lock")
@@ -93,6 +94,30 @@ SLIDESHOW_ORDER_LABELS = {
     "sequential": "In order",
 }
 
+WALLPAPER_BACKENDS = (
+    "auto", "gnome", "desktop", "feh", "dms", "hyprpaper", "awww", "swaybg",
+)
+WALLPAPER_BACKEND_LABELS = {
+    "auto": "Detect automatically",
+    "gnome": "GNOME desktop settings",
+    "desktop": "X11 desktop window",
+    "feh": "feh",
+    "dms": "DankMaterialShell",
+    "hyprpaper": "hyprpaper",
+    "awww": "awww",
+    "swaybg": "swaybg",
+}
+
+TERMINAL_TARGETS = ("kitty", "gnome-terminal")
+TERMINAL_TARGET_LABELS = {
+    "kitty": "Kitty",
+    "gnome-terminal": "GNOME Terminal",
+}
+
+BOOLEAN_KEYS = (
+    "match_colors", "glass", "recolour_gtk", "terminal", "lock_screen",
+)
+
 DEFAULT_CONFIG = {
     "folder": _default_folder(),
     "mode": "auto",                 # light | dark | auto
@@ -102,11 +127,14 @@ DEFAULT_CONFIG = {
     "accent": None,                 # custom #RRGGBB, or None for the picture's accent
     "match_colors": True,           # recolour when a wallpaper is applied
     "wallpaper_mode": "fill",       # fill | fit | stretch | center | tile | span
+    "wallpaper_backend": "auto",    # auto, or force one of WALLPAPER_BACKENDS
     "slide_minutes": 0,             # 0 = no slideshow
     "slideshow_order": "shuffle",   # shuffle | sequential
     "glass": False,
+    "glass_opacity": 0.72,          # wallpaper visibility through app windows
     "recolour_gtk": True,
     "terminal": True,
+    "terminal_targets": None,       # None = every detected terminal, or a list
     "lock_screen": False,
     "icon_theme": None,             # None = leave the system value alone
     "cursor_theme": None,
@@ -115,14 +143,17 @@ DEFAULT_CONFIG = {
     "mono_font": None,
     "text_scale": None,
     "autostart_profile": None,      # profile id, or None for the last applied look
+    "autostart_delay": 8,           # seconds to wait after login
     "favorites": [],
 }
 
 PROFILE_KEYS = (
     "mode", "light_from", "dark_from", "style", "accent", "wallpaper_mode",
-    "glass", "recolour_gtk", "terminal", "lock_screen", "icon_theme",
-    "cursor_theme", "cursor_size", "font", "mono_font", "text_scale",
+    "glass", "glass_opacity", "recolour_gtk", "terminal", "terminal_targets",
+    "lock_screen", "icon_theme", "cursor_theme", "cursor_size", "font",
+    "mono_font", "text_scale", "autostart_delay",
 )
+CONFIG_KEYS = tuple(DEFAULT_CONFIG)
 
 
 # --- files ------------------------------------------------------------------------
@@ -160,9 +191,34 @@ def write_json(path, value):
     write_text(path, json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
+def _bool(value, default=False):
+    """Treat JSON true/false and the strings people type in a terminal alike."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("1", "true", "yes", "on"):
+            return True
+        if lowered in ("0", "false", "no", "off", ""):
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _hex(value, fallback=None):
+    if not isinstance(value, str):
+        return fallback
+    value = value.strip().upper()
+    if len(value) == 7 and value.startswith("#") and \
+            all(character in "0123456789ABCDEF" for character in value[1:]):
+        return value
+    return fallback
+
+
 def load_config():
     config = {**DEFAULT_CONFIG, **_read_json(CONFIG, {})}
-    if not isinstance(config.get("folder"), str):
+    if not isinstance(config.get("folder"), str) or not config["folder"]:
         config["folder"] = DEFAULT_CONFIG["folder"]
     if config.get("mode") not in ("light", "dark", "auto"):
         config["mode"] = "auto"
@@ -173,14 +229,20 @@ def load_config():
             config[key] = max(0, min(23, int(config[key])))
         except (TypeError, ValueError):
             config[key] = DEFAULT_CONFIG[key]
-    try:
-        config["slide_minutes"] = max(0, int(config.get("slide_minutes", 0)))
-    except (TypeError, ValueError):
-        config["slide_minutes"] = 0
+    for key, upper in (("slide_minutes", 10080), ("autostart_delay", 300)):
+        try:
+            config[key] = max(0, min(upper, int(config.get(key, 0))))
+        except (TypeError, ValueError):
+            config[key] = DEFAULT_CONFIG[key]
     if config.get("wallpaper_mode") not in WALLPAPER_MODES:
         config["wallpaper_mode"] = "fill"
+    if config.get("wallpaper_backend") not in WALLPAPER_BACKENDS:
+        config["wallpaper_backend"] = "auto"
     if config.get("slideshow_order") not in SLIDESHOW_ORDERS:
         config["slideshow_order"] = "shuffle"
+    for key in BOOLEAN_KEYS:
+        config[key] = _bool(config.get(key), DEFAULT_CONFIG[key])
+    config["accent"] = _hex(config.get("accent"))
     for key in ("icon_theme", "cursor_theme", "font", "mono_font",
                 "autostart_profile"):
         if config.get(key) is not None and not isinstance(config.get(key), str):
@@ -195,15 +257,31 @@ def load_config():
             config["text_scale"] = max(0.5, min(3.0, float(config["text_scale"])))
         except (TypeError, ValueError):
             config["text_scale"] = None
+    try:
+        config["glass_opacity"] = max(0.15, min(1.0, float(config["glass_opacity"])))
+    except (TypeError, ValueError):
+        config["glass_opacity"] = DEFAULT_CONFIG["glass_opacity"]
+    targets = config.get("terminal_targets")
+    if targets is None:
+        config["terminal_targets"] = None
+    elif isinstance(targets, (list, tuple)):
+        seen = []
+        for target in targets:
+            if isinstance(target, str) and target in TERMINAL_TARGETS and target not in seen:
+                seen.append(target)
+        config["terminal_targets"] = seen
+    else:
+        config["terminal_targets"] = None
     config["favorites"] = [path for path in config.get("favorites", [])
                            if isinstance(path, str)]
     return config
 
 
 def save_config(**changes):
-    config = {**load_config(), **changes}
-    write_json(CONFIG, config)
-    return config
+    with locked():
+        config = {**load_config(), **changes}
+        write_json(CONFIG, config)
+        return load_config()
 
 
 def load_state():

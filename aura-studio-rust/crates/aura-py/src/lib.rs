@@ -288,28 +288,42 @@ fn kitty_theme(value: &Bound<'_, PyAny>) -> PyResult<String> {
     Ok(lines.join("\n") + "\n")
 }
 
-const GLASS_CSS: &str = r#"
+fn glass_css(opacity: f64) -> String {
+    let window = opacity.clamp(0.15, 1.0);
+    let header = (window * 0.67).clamp(0.12, 0.95);
+    let backdrop = (window * 0.58).clamp(0.10, 0.90);
+    let view = (window * 0.67).clamp(0.12, 0.95);
+    let sidebar = (window * 0.58).clamp(0.10, 0.90);
+    format!(
+        r#"
 /* see-through windows: the wallpaper shows through, text stays solid */
-window.background:not(.popup):not(tooltip):not(.solid-csd):not(.desktopwindow) {
-  background-color: alpha(@window_bg_color, 0.72);
-}
-headerbar, .titlebar:not(headerbar) { background-color: alpha(@headerbar_bg_color, 0.48); }
-headerbar:backdrop, .titlebar:not(headerbar):backdrop { background-color: alpha(@headerbar_backdrop_color, 0.42); }
+window.background:not(.popup):not(tooltip):not(.solid-csd):not(.desktopwindow) {{
+  background-color: alpha(@window_bg_color, {window:.2});
+}}
+headerbar, .titlebar:not(headerbar) {{ background-color: alpha(@headerbar_bg_color, {header:.2}); }}
+headerbar:backdrop, .titlebar:not(headerbar):backdrop {{ background-color: alpha(@headerbar_backdrop_color, {backdrop:.2}); }}
 .view, textview text, iconview, treeview.view, list, listview, columnview, .content-view,
-.boxed-list, scrolledwindow > viewport > list, entry, spinbutton {
-  background-color: alpha(@view_bg_color, 0.48);
-}
-.sidebar, placessidebar, stacksidebar, .navigation-sidebar, .sidebar-pane {
-  background-color: alpha(@sidebar_bg_color, 0.42);
-}
-list row, listview row, .card, frame > border { background-color: transparent; }
+.boxed-list, scrolledwindow > viewport > list, entry, spinbutton {{
+  background-color: alpha(@view_bg_color, {view:.2});
+}}
+.sidebar, placessidebar, stacksidebar, .navigation-sidebar, .sidebar-pane {{
+  background-color: alpha(@sidebar_bg_color, {sidebar:.2});
+}}
+list row, listview row, .card, frame > border {{ background-color: transparent; }}
 popover > contents, popover.background > contents, menu, .menu, .context-menu, tooltip,
-tooltip.background, messagedialog, dialog.background, window.dialog {
+tooltip.background, messagedialog, dialog.background, window.dialog {{
   background-color: @popover_bg_color;
+}}
+"#
+    )
 }
-"#;
 
-fn gtk_css_for_mode(mode: &engine::ModePalette, dark: bool, glass: bool) -> String {
+fn gtk_css_for_mode(
+    mode: &engine::ModePalette,
+    dark: bool,
+    glass: bool,
+    glass_opacity: f64,
+) -> String {
     if !engine::valid_mode(mode) {
         return String::new();
     }
@@ -415,19 +429,24 @@ fn gtk_css_for_mode(mode: &engine::ModePalette, dark: bool, glass: bool) -> Stri
     }
     text.push_str("\nwindow.desktopwindow { background-color: transparent; }\n");
     if glass {
-        text.push_str(GLASS_CSS);
+        text.push_str(&glass_css(glass_opacity));
     }
     text
 }
 
 #[pyfunction]
-#[pyo3(signature = (value, dark, glass=false))]
-fn gtk_css(value: &Bound<'_, PyAny>, dark: bool, glass: bool) -> PyResult<String> {
+#[pyo3(signature = (value, dark, glass=false, opacity=0.72))]
+fn gtk_css(
+    value: &Bound<'_, PyAny>,
+    dark: bool,
+    glass: bool,
+    opacity: f64,
+) -> PyResult<String> {
     let mode = mode_from_py(value)?;
     if !engine::valid_mode(&mode) {
         return Err(PyValueError::new_err("invalid palette colours"));
     }
-    Ok(gtk_css_for_mode(&mode, dark, glass))
+    Ok(gtk_css_for_mode(&mode, dark, glass, opacity))
 }
 
 #[pyfunction]
@@ -437,7 +456,7 @@ fn css_for_export(value: &Bound<'_, PyAny>, dark: bool) -> PyResult<String> {
     if !engine::valid_mode(mode) {
         return Err(PyValueError::new_err("invalid palette colours"));
     }
-    Ok(gtk_css_for_mode(mode, dark, false))
+    Ok(gtk_css_for_mode(mode, dark, false, 0.72))
 }
 
 #[pyfunction]

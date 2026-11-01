@@ -26,7 +26,9 @@ scripts/build-rust.sh         builds and copies the extension
 
 The extension is installed as `aura_core.abi3.so` in the project root. It is
 built with the stable ABI for Python 3.12+, so the same file works with the
-Pixi Python and with the system Python fallback.
+Pixi Python and with the system Python fallback. `gtk_css(value, dark, glass,
+opacity)` also takes the see-through window opacity; older builds keep working
+through the compatibility fallback in `aura_studio/palette.py`.
 
 ## Build and run
 
