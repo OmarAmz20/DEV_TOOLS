@@ -120,11 +120,24 @@ class WallpaperBackendTest(unittest.TestCase):
 
         with mock.patch.object(system, "detect_backend",
                                return_value={"name": "feh", "label": "feh"}), \
+                mock.patch.object(system, "_stop_desktop_window"), \
                 mock.patch.object(system, "_run", side_effect=fake_run):
             result = system.apply_wallpaper(image)
         self.assertEqual(result["backend"], "feh")
         self.assertEqual(calls[-1][:3], ["feh", "--no-fehbg", "--bg-fill"])
         self.assertEqual(calls[-1][-1], image)
+
+    def test_desktop_backend_starts_a_window(self):
+        with tempfile.TemporaryDirectory(prefix="aura-desktop-test-") as directory:
+            image = os.path.join(directory, "wall paper.png")
+            write_png(image)
+            with mock.patch.object(system, "detect_backend",
+                                   return_value={"name": "desktop",
+                                                 "label": "X11 desktop window"}), \
+                    mock.patch.object(system, "_start_desktop_window") as start:
+                result = system.apply_wallpaper(image)
+        self.assertEqual(result["backend"], "desktop")
+        start.assert_called_once_with(image)
 
 
 class BackendTest(unittest.TestCase):
@@ -162,6 +175,21 @@ class BackendTest(unittest.TestCase):
             session = system.session_label()
         self.assertEqual(result["name"], "feh")
         self.assertIn("X11", session)
+
+    def test_locked_gnome_x11_uses_desktop_window(self):
+        with mock.patch.dict(os.environ, {
+                "XDG_CURRENT_DESKTOP": "ubuntu:GNOME",
+                "XDG_SESSION_TYPE": "x11",
+                "DISPLAY": ":0",
+                "WAYLAND_DISPLAY": ""}, clear=False), \
+                mock.patch.object(system, "_schema", return_value=FakeSettings(False)), \
+                mock.patch.object(system, "_dms_available", return_value=False), \
+                mock.patch.object(system, "_hyprland", return_value=False), \
+                mock.patch.object(system, "_wayland", return_value=False), \
+                mock.patch.object(system, "_desktop_window_available", return_value=True):
+            result = system.detect_backend(refresh=True)
+        self.assertEqual(result["name"], "desktop")
+        self.assertIn("desktop", result["label"].lower())
 
 
 if __name__ == "__main__":

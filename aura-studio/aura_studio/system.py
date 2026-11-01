@@ -11,6 +11,7 @@ import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import time
 import uuid
@@ -33,6 +34,10 @@ KITTY_MARKER = "include aura-theme.conf # aura-studio"
 OUR_THEMES = ("Aura A", "Aura B")
 TERMINAL = "/org/gnome/terminal/legacy/profiles:"
 SWAYBG_PID = os.path.join(store.CONFIG_DIR, "swaybg.pid")
+DESKTOP_PID = os.path.join(store.CONFIG_DIR, "desktop-wallpaper.pid")
+DESKTOP_LOG = os.path.join(store.CONFIG_DIR, "desktop-wallpaper.log")
+DESKTOP_HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "x11_wallpaper.py")
 
 TOUCHED = [
     ("org.gnome.desktop.interface", "gtk-theme"),
@@ -166,6 +171,132 @@ def _gnome_session():
     return "gnome" in desktop or "ubuntu" in desktop
 
 
+_DESKTOP_PYTHON = False
+
+
+def _desktop_python():
+    """A Python that can import the host's GTK 3, or None.
+
+    The Pixi environment only contains GTK 4.  The tiny desktop-window helper
+    uses the system GTK 3, which is already installed on Ubuntu.
+    """
+    global _DESKTOP_PYTHON
+    if _DESKTOP_PYTHON is not False:
+        return _DESKTOP_PYTHON
+    candidates = [
+        os.environ.get("AURA_DESKTOP_PYTHON"),
+        "/usr/bin/python3",
+        shutil.which("python3"),
+    ]
+    probe = ("import gi; gi.require_version('Gtk', '3.0'); "
+             "gi.require_version('GdkPixbuf', '2.0'); "
+             "from gi.repository import Gtk, GdkPixbuf")
+    for candidate in candidates:
+        if not candidate:
+            continue
+        result = _run([candidate, "-c", probe], timeout=8)
+        if result.returncode == 0:
+            _DESKTOP_PYTHON = candidate
+            return candidate
+    _DESKTOP_PYTHON = None
+    return None
+
+
+def _desktop_window_available():
+    return bool(os.environ.get("DISPLAY")) and not _wayland() and \
+        os.path.isfile(DESKTOP_HELPER) and _desktop_python() is not None
+
+
+def _desktop_pid():
+    try:
+        with open(DESKTOP_PID, encoding="utf-8") as handle:
+            return int(handle.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _pid_is_desktop_helper(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            return b"x11_wallpaper.py" in handle.read()
+    except OSError:
+        return False
+
+
+def _stop_desktop_window():
+    pid = _desktop_pid()
+    if pid and _pid_is_desktop_helper(pid):
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            if not _pid_alive(pid):
+                break
+            time.sleep(0.1)
+        if _pid_alive(pid):
+            with contextlib.suppress(OSError):
+                os.kill(pid, signal.SIGKILL)
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(DESKTOP_PID)
+
+
+_DESKTOP_ENV_DROP = {
+    "LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONPATH", "PYTHONHOME",
+    "GI_TYPELIB_PATH", "GSETTINGS_SCHEMA_DIR", "GSETTINGS_BACKEND",
+    "GIO_EXTRA_MODULES", "GDK_BACKEND", "GDK_SCALE", "GDK_DPI_SCALE",
+    "GDK_PIXBUF_MODULE_FILE", "GDK_PIXBUF_MODULEDIR", "GTK_PATH",
+    "GTK_THEME", "GTK_MODULES", "GTK_DEBUG", "XDG_DATA_DIRS",
+    "CONDA_PREFIX", "VIRTUAL_ENV",
+}
+
+
+def _desktop_environment():
+    """Keep the helper on the host's GTK 3, not the Pixi GTK 4 stack."""
+    env = {key: value for key, value in os.environ.items()
+           if key not in _DESKTOP_ENV_DROP
+           and not key.startswith(("PIXI_", "CONDA_", "MAMBA_"))}
+    env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+    env["GDK_BACKEND"] = "x11"
+    return env
+
+
+def _start_desktop_window(path):
+    python = _desktop_python()
+    if not python:
+        raise RuntimeError("no system Python with GTK 3 for the desktop window")
+    _stop_desktop_window()
+    os.makedirs(store.CONFIG_DIR, exist_ok=True)
+    with open(DESKTOP_LOG, "wb") as log:
+        process = subprocess.Popen(
+            [python, DESKTOP_HELPER, path],
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            env=_desktop_environment(),
+            start_new_session=True, close_fds=True)
+    with open(DESKTOP_PID, "w", encoding="utf-8") as handle:
+        handle.write(str(process.pid))
+    for _ in range(10):
+        if process.poll() is not None:
+            break
+        time.sleep(0.1)
+    if process.poll() is not None:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(DESKTOP_PID)
+        try:
+            with open(DESKTOP_LOG, encoding="utf-8", errors="replace") as handle:
+                details = handle.read().strip().splitlines()[-3:]
+        except OSError:
+            details = []
+        raise RuntimeError("desktop wallpaper window failed"
+                           + (f": {'; '.join(details)}" if details else ""))
+
+
 def detect_backend(refresh=False):
     """The wallpaper backend that is actually usable right now."""
     global _BACKEND
@@ -183,8 +314,14 @@ def detect_backend(refresh=False):
         _BACKEND = {"name": "awww", "label": "awww"}
     elif _wayland() and shutil.which("swaybg"):
         _BACKEND = {"name": "swaybg", "label": "swaybg"}
+    elif not _wayland() and _gnome_session() and _desktop_window_available():
+        # GNOME Shell ignores the X root pixmap.  When its background key is
+        # locked, a desktop window is the only user-level way to show a picture.
+        _BACKEND = {"name": "desktop", "label": "X11 desktop window"}
     elif shutil.which("feh") and not _wayland():
         _BACKEND = {"name": "feh", "label": "feh"}
+    elif not _wayland() and _desktop_window_available():
+        _BACKEND = {"name": "desktop", "label": "X11 desktop window"}
     elif gnome_ready:
         _BACKEND = {"name": "gnome", "label": "GNOME desktop"}
     else:
@@ -242,6 +379,8 @@ def apply_wallpaper(path):
 
     backend = detect_backend(refresh=True)
     name = backend["name"]
+    if name != "desktop":
+        _stop_desktop_window()
     if name == "dms":
         output = _dms_output("wallpaper", "set", applied)
         if "SUCCESS" not in output:
@@ -281,6 +420,8 @@ def apply_wallpaper(path):
         result = _run(["feh", "--no-fehbg", "--bg-fill", applied], timeout=15)
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout).strip() or "feh failed")
+    elif name == "desktop":
+        _start_desktop_window(applied)
     elif name == "gnome":
         uri = Gio.File.new_for_path(applied).get_uri()
         if not _set_string("org.gnome.desktop.background", "picture-uri", uri):
@@ -289,7 +430,7 @@ def apply_wallpaper(path):
         _sync()
     else:
         raise RuntimeError("no wallpaper backend found (install awww, hyprpaper, "
-                           "swaybg, feh, or run GNOME)")
+                           "swaybg, feh, or use an X11 session)")
 
     return {
         "path": applied,
@@ -748,6 +889,7 @@ def restore():
         _restore_kitty(originals)
         _restore_dms_wallpapers(originals)
         _stop_swaybg()
+        _stop_desktop_window()
         for path in (GTK3_CSS, GTK4_CSS):
             _remove_import(path)
         with contextlib.suppress(FileNotFoundError):
