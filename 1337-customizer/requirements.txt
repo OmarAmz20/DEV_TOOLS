@@ -1,4 +1,7 @@
-# Runtime requirements
-# PyGObject, GTK 4 and libadwaita are provided by the distribution.
+# Legacy compatibility file.
+# Python dependencies are managed by pixi.toml + pixi.lock.
+# Use `pixi add <package>` or `pixi add --pypi <package>`; do not pip-install
+# into the Pixi environment.
+#
+# PyGObject, GTK 4, libadwaita, cairo and Pillow come from conda-forge.
 Pillow>=10.0
-# Optional: cairo is normally provided by python3-cairo / python-cairo.

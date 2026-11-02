@@ -20,10 +20,33 @@ DATA_HOME = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share")
 STATE_HOME = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state")
 CACHE_HOME = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache")
 
+
+def _goinfre_root() -> Path | None:
+    """The 42-school goinfre mount, when this machine has a writable one."""
+    candidates = []
+    override = os.environ.get("LEET_GOINFRE")
+    if override:
+        candidates.append(Path(override).expanduser())
+    candidates.append(HOME / "goinfre")
+    for candidate in candidates:
+        try:
+            if candidate.is_dir() and os.access(candidate, os.W_OK):
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
+
+
+GOINFRE_ROOT = _goinfre_root()
+GOINFRE_DIR = GOINFRE_ROOT / APP_SLUG if GOINFRE_ROOT else None
+
 CONFIG_DIR = CONFIG_HOME / APP_SLUG
 DATA_DIR = DATA_HOME / APP_SLUG
 STATE_DIR = STATE_HOME / APP_SLUG
-CACHE_DIR = CACHE_HOME / APP_SLUG
+CACHE_DIR = Path(
+    os.environ.get("LEET_CACHE_DIR")
+    or (GOINFRE_DIR / "cache" if GOINFRE_DIR else CACHE_HOME / APP_SLUG)
+)
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 LIBRARY_DB = DATA_DIR / "library.db"

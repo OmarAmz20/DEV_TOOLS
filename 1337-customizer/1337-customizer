@@ -1,9 +1,37 @@
 #!/usr/bin/env bash
-# 1337-Customizer launcher.  Keeps the checkout relocatable and sets up the
-# GI typelib path used by gtk4-layer-shell on some distributions.
+# 1337-Customizer launcher.  Keeps the checkout relocatable, uses the Pixi
+# environment when one is available, and falls back to the system Python.
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON="${LEET_PYTHON:-python3}"
+
+# shellcheck source=scripts/env.sh
+. "$HERE/scripts/env.sh"
+
+MODE=auto
+if [ -f "$HERE/.leet-install-mode" ]; then
+  MODE=$(tr -d '[:space:]' < "$HERE/.leet-install-mode" 2>/dev/null || printf 'auto')
+fi
+if [ "${LEET_USE_SYSTEM:-0}" = "1" ]; then
+  MODE=system
+fi
+
+if [ "$MODE" != "system" ] && [ -f "$HERE/pixi.toml" ]; then
+  leet_prepare_pixi_config "$HERE"
+  PIXI="$(leet_find_pixi || true)"
+  if [ -n "$PIXI" ]; then
+    if [ ! -e "$HERE/.pixi/envs/default" ]; then
+      echo "1337-Customizer: preparing the Pixi environment (first run)…" >&2
+      if ! "$PIXI" install --frozen --manifest-path "$HERE/pixi.toml" >/dev/null 2>&1; then
+        "$PIXI" install --manifest-path "$HERE/pixi.toml" || true
+      fi
+    fi
+    if [ -e "$HERE/.pixi/envs/default" ]; then
+      exec "$PIXI" run --frozen --manifest-path "$HERE/pixi.toml" \
+        python -m leet_customizer "$@"
+    fi
+    echo "1337-Customizer: Pixi environment unavailable; using system Python." >&2
+  fi
+fi
 
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
 for candidate in \
@@ -19,4 +47,4 @@ for candidate in \
   fi
 done
 
-exec "$PYTHON" -m leet_customizer "$@"
+exec "${LEET_PYTHON:-python3}" -m leet_customizer "$@"

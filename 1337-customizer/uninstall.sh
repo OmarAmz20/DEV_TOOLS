@@ -14,16 +14,23 @@ BIN="$HOME/.local/bin/1337-customizer"
 OLD_BIN="$HOME/.local/bin/hamiid-studio"
 KEEP_DATA=0
 RESTORE=1
+PURGE=0
+
+GOINFRE_BASE="${LEET_GOINFRE:-$HOME/goinfre}"
+GOINFRE_ROOT=""
+if [ -d "$GOINFRE_BASE" ] && [ -w "$GOINFRE_BASE" ]; then
+  GOINFRE_ROOT="$(cd -- "$GOINFRE_BASE" && pwd -P)/1337-customizer"
+fi
 
 for arg in "$@"; do
   case "$arg" in
     --keep-data) KEEP_DATA=1 ;;
     --no-restore) RESTORE=0 ;;
-    --purge|--all) KEEP_DATA=0 ;;
+    --purge|--all) KEEP_DATA=0; PURGE=1 ;;
     --restore) RESTORE=1 ;;
     --help|-h)
       cat <<'EOF'
-Usage: ./uninstall.sh [--keep-data] [--no-restore]
+Usage: ./uninstall.sh [--keep-data] [--no-restore] [--purge]
 
 By default this restores the desktop changes, then removes the app and every
 piece of app-owned data: config, library database, saved looks, photos copied
@@ -32,6 +39,7 @@ by the app, caches, logs, generated GTK/terminal themes and launchers.
   --keep-data   keep the library database, saved looks, notes, applied copies
                 and configuration; remove only the installed app
   --no-restore  do not restore the previous GTK/terminal/wallpaper state
+  --purge       also delete the goinfre Pixi package cache and environments
 EOF
       exit 0
       ;;
@@ -165,6 +173,9 @@ if [ "$KEEP_DATA" = 0 ]; then
   rm -rf "$XDG_DATA/1337-customizer"
   rm -rf "$XDG_STATE/1337-customizer"
   rm -rf "$XDG_CACHE/1337-customizer"
+  if [ -n "$GOINFRE_ROOT" ]; then
+    rm -rf "$GOINFRE_ROOT/cache"
+  fi
   # Legacy Hamiid Studio data and config.
   rm -rf "$XDG_CONFIG/hamiid-studio"
   rm -rf "$XDG_DATA/hamiid-studio"
@@ -178,6 +189,13 @@ else
   rm -rf "$PREFIX/app"
   rm -rf "$OLD_PREFIX/app"
   echo "1337-Customizer removed. Library, notes, saved looks and configuration were kept."
+fi
+
+if [ "$PURGE" = 1 ] && [ -n "$GOINFRE_ROOT" ]; then
+  rm -rf "$GOINFRE_ROOT/pixi-cache" "$GOINFRE_ROOT/pixi-home" \
+         "$GOINFRE_ROOT/pip-cache" "$GOINFRE_ROOT/uv-cache"
+  rmdir "$GOINFRE_ROOT" 2>/dev/null || true
+  echo "Pixi package cache and environments removed from $GOINFRE_ROOT."
 fi
 
 if command -v update-desktop-database >/dev/null 2>&1; then

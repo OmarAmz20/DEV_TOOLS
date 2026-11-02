@@ -22,11 +22,14 @@ Installed command: ~/.local/bin/1337-customizer
 # Start enabled helpers without opening a window
 ./1337-customizer --background
 
-# Install for the current user
+# Install for the current user (Pixi environment)
 ./install.sh
 
 # Install and launch
 ./install.sh --launch
+
+# Use the distribution Python + GTK instead of Pixi
+./install.sh --system
 
 # Build the self-extracting installer
 ./packaging/build-run.sh
@@ -42,7 +45,35 @@ chmod +x dist/1337-Customizer.run
 Installed launcher:
 
 ```bash
+# Open the studio from any terminal
+1337-customizer
+
+# Same command, full path (works even if ~/.local/bin is not on PATH)
 ~/.local/bin/1337-customizer
+```
+
+The installer prints a warning when `~/.local/bin` is missing from `PATH`.
+Add it to your shell profile with:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Python packages are managed with Pixi:
+
+```bash
+# Run the studio in the Pixi environment
+pixi run run
+
+# Run tests in the Pixi environment
+pixi run test
+
+# Add a dependency (conda-forge, then PyPI)
+pixi add pillow
+pixi add --pypi some-package
+
+# Start from the checkout with the system Python instead
+LEET_USE_SYSTEM=1 ./1337-customizer
 ```
 
 ## 2. Wallpapers
@@ -299,6 +330,9 @@ Compatibility aliases:
 ./uninstall.sh --all
 ```
 
+`--purge` also removes the goinfre Pixi package cache and environments. The
+default keeps them so a reinstall does not download GTK again.
+
 The uninstaller removes:
 
 - installed app code, launcher and menu entry
@@ -313,29 +347,42 @@ The uninstaller removes:
 ## 10. Tests and development
 
 ```bash
-# Compile-check Python
-python3 -m compileall -q leet_customizer
+# Compile-check Python in the Pixi environment
+pixi run compile
 
-# Run all tests
-python3 -m unittest discover -s tests -v
+# Run all tests in the Pixi environment
+pixi run test
 
 # Quick undefined-name/lint check
-flake8 leet_customizer --select=F821,F811,E9 --max-line-length=120
+pixi run lint
 ```
 
 Run directly as a module:
 
 ```bash
-python3 -m leet_customizer
-python3 -m leet_customizer --version
-python3 -m leet_customizer doctor
+pixi run python -m leet_customizer
+pixi run python -m leet_customizer --version
+pixi run doctor
+```
+
+Add Python packages with Pixi only:
+
+```bash
+pixi add <conda-package>
+pixi add --pypi <pypi-package>
 ```
 
 ## 11. Environment variables
 
 ```bash
-# Use a different Python executable
-LEET_PYTHON=/usr/bin/python3 ./1337-customizer
+# Use a different Python executable (system mode)
+LEET_PYTHON=/usr/bin/python3 LEET_USE_SYSTEM=1 ./1337-customizer
+
+# Force the system Python instead of Pixi
+LEET_USE_SYSTEM=1 ./1337-customizer
+
+# Use a different goinfre mount
+LEET_GOINFRE=/path/to/goinfre ./install.sh
 
 # Install to a custom location
 LEET_PREFIX="$HOME/.local/share/1337-customizer-custom" ./install.sh
@@ -351,7 +398,11 @@ Config:   ${XDG_CONFIG_HOME:-~/.config}/1337-customizer
 Data:     ${XDG_DATA_HOME:-~/.local/share}/1337-customizer
 State:    ${XDG_STATE_HOME:-~/.local/state}/1337-customizer
 Cache:    ${XDG_CACHE_HOME:-~/.cache}/1337-customizer
+          or ~/goinfre/1337-customizer/cache when goinfre exists
 ```
+
+When `~/goinfre` exists, Pixi packages and environments, pip/uv downloads and
+the app cache also live under `~/goinfre/1337-customizer`.
 
 ## 12. Backend diagnostics
 

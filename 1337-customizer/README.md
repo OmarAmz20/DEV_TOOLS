@@ -138,7 +138,8 @@ Thirteen native widget types, all running in a layer-shell desktop host:
 ## Install
 
 1337-Customizer is a source checkout with a per-user installer. No sudo is
-required; the app uses the system Python and GTK already on your machine.
+required. Python packages, GTK and libadwaita come from a self-contained
+**Pixi** environment; Pixi is installed automatically when it is missing.
 
 ```bash
 cd 1337-customizer
@@ -146,9 +147,9 @@ cd 1337-customizer
 ```
 
 This installs to `~/.local/share/1337-customizer`, creates
-`~/.local/bin/1337-customizer`, installs the desktop entry and icon, and opens the
-studio. Open **1337-Customizer** from your application menu or run
-`1337-customizer`.
+`~/.local/bin/1337-customizer`, installs the desktop entry and icon, prepares
+the Pixi environment, and opens the studio. Open **1337-Customizer** from your
+application menu or run `1337-customizer`.
 
 A self-extracting installer is also built at **`dist/1337-Customizer.run`**:
 mark it executable once, then double-click it. It installs for the current
@@ -161,21 +162,79 @@ To run directly from the checkout:
 ./1337-customizer
 ```
 
+The first run prepares the Pixi environment if `install.sh` has not done it
+yet. Use `./install.sh --system` (or `LEET_USE_SYSTEM=1 ./1337-customizer`)
+to use the distribution Python instead.
+
+### Open from the terminal
+
+After `install.sh`, the command is on your `PATH`:
+
+```bash
+1337-customizer
+```
+
+The same command handles the GUI and the CLI:
+
+```bash
+1337-customizer --help
+1337-customizer --version
+1337-customizer widgets edit
+1337-customizer --background    # start helpers without opening the window
+```
+
+If your shell cannot find it, add `~/.local/bin` to `PATH` or run the full
+path:
+
+```bash
+~/.local/bin/1337-customizer
+```
+
+### Python packages with Pixi
+
+`pixi.toml` and `pixi.lock` are the source of truth for Python dependencies.
+Add packages with Pixi, never with pip or uv:
+
+```bash
+pixi add pillow              # conda-forge package
+pixi add --pypi some-package # PyPI package
+pixi run run                 # start the studio
+pixi run test                # run the test suite
+```
+
+`requirements.txt` is kept only for legacy tooling; it is not used by the
+installer.
+
+### 42-school machines and goinfre
+
+When `~/goinfre` exists and is writable, the installer and launcher use it
+automatically for the large files:
+
+| Data | Normal location | With goinfre |
+|---|---|---|
+| Pixi package cache and environments | `~/.cache/rattler/cache` | `~/goinfre/1337-customizer/pixi-cache/` |
+| pip downloads | `~/.cache/pip` | `~/goinfre/1337-customizer/pip-cache/` |
+| uv downloads | `~/.cache/uv` | `~/goinfre/1337-customizer/uv-cache/` |
+| Thumbnails and previews | `~/.cache/1337-customizer` | `~/goinfre/1337-customizer/cache/` |
+
+Pixi environments are kept detached in that cache, so the checkout only
+contains a small `.pixi/config.toml` and an environment symlink. Set
+`LEET_GOINFRE` to point at a different goinfre mount. On machines without
+goinfre everything falls back to the normal XDG locations.
+
 ### Requirements
 
-- Linux with Python 3.11+ and PyGObject
-- GTK 4.14+ and libadwaita 1.5+
-- Pillow (`python3-pil`)
-- Cairo (`python3-cairo` / `python-cairo`) for layer-shell input regions
+The Pixi environment provides Python 3.12, PyGObject, GTK 4.14+, libadwaita
+1.5+, Pillow, Cairo and gtk4-layer-shell. The rest are optional system tools:
+
 - `ffmpeg` / `ffprobe` for video thumbnails and frame fallback
 - Optional: `awww`, DMS, GNOME, Plasma, feh for wallpaper backends
 - Optional: `mpvpaper` and `mpv` for video wallpapers; the bundled engine works
   on systems where the build dependencies exist
-- Optional: `gtk4-layer-shell` for desktop widgets and video layers
 - Optional: `playerctl` for the Now Playing widget; `notify-send` for
   notifications
 
-Ubuntu / Debian:
+Ubuntu / Debian (only needed for `--system` or optional helpers):
 
 ```bash
 sudo apt install python3-gi python3-pil gir1.2-gtk-4.0 gir1.2-adw-1 \
@@ -259,13 +318,17 @@ leet_customizer/
   sessiond.py        slideshow and auto light/dark helper
   pages/             studio screens
 engine/              bundled mpvpaper binary, source archive and build script
+scripts/             Pixi activation and goinfre environment helpers
 tests/               non-destructive unit tests
+pixi.toml            Python and GTK dependency definition
+pixi.lock            reproducible Pixi environment
 ```
 
 Run the tests from the checkout:
 
 ```bash
-python3 -m unittest discover -s tests -v
+pixi run test
+pixi run compile
 ```
 
 ## Restore and uninstall
@@ -283,6 +346,9 @@ python3 -m unittest discover -s tests -v
 - `./uninstall.sh --keep-data` removes the app and generated themes but keeps
   the library, notes, saved looks and configuration.
 - `./uninstall.sh --no-restore` skips restoring the previous desktop state.
+- `./uninstall.sh --purge` also deletes the goinfre Pixi package cache and
+  environments. Without it, the expensive Pixi download is kept for a
+  reinstall.
 
 ## Notes and limits
 

@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -223,6 +224,16 @@ def ensure_gi_paths() -> None:
 
 
 def find_layer_shell_library() -> str | None:
+    # Prefer the library that belongs to the running Python environment (the
+    # Pixi environment, for example) before falling back to system paths.
+    for prefix in (sys.prefix, os.environ.get("CONDA_PREFIX")):
+        if not prefix:
+            continue
+        for relative in ("lib/libgtk4-layer-shell.so",
+                         "lib64/libgtk4-layer-shell.so"):
+            candidate = Path(prefix) / relative
+            if candidate.exists():
+                return str(candidate)
     for candidate in constants.LAYER_SHELL_LIBRARY_PATHS:
         if Path(candidate).exists():
             return candidate

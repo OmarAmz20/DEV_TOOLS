@@ -8,7 +8,7 @@ OUT="$DIST/1337-Customizer.run"
 mkdir -p "$DIST"
 
 tar -czf "$PAYLOAD" -C "$(dirname -- "$ROOT")" \
-  --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
+  --exclude='.git' --exclude='.pixi' --exclude='__pycache__' --exclude='*.pyc' \
   --exclude='docs' --exclude='dist' --exclude='tests' \
   "1337-customizer"
 
