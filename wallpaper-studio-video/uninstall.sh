@@ -11,6 +11,7 @@ if [ "$(id -u)" = 0 ]; then
 fi
 if [ -x "$studio_launcher" ]; then
     "$studio_launcher" video stop >/dev/null 2>&1 || true
+    "$studio_launcher" dock stop >/dev/null 2>&1 || true
     "$studio_launcher" widgets stop
     "$studio_launcher" stop
     "$studio_launcher" restore --scope all
@@ -22,7 +23,8 @@ rm -f -- "$studio_data/applications/io.github.WallpaperStudioVideo.desktop" \
     "$studio_data/icons/hicolor/scalable/apps/io.github.WallpaperStudioVideo.svg" \
     "$studio_config/autostart/wallpaper-studio-video-session.desktop" \
     "$studio_config/autostart/wallpaper-studio-video-widgets.desktop" \
-    "$studio_config/autostart/wallpaper-studio-video-video.desktop"
+    "$studio_config/autostart/wallpaper-studio-video-video.desktop" \
+    "$studio_config/autostart/wallpaper-studio-video-dock.desktop"
 rm -rf -- "$studio_data/gnome-shell/extensions/wallpaper-studio-video@local"
 rm -f -- "$studio_config/video-runtime.json"
 # The wallpaper images, backup, profile and working Shell override stay intact.

@@ -8,11 +8,12 @@ from .backend import prepare_environment, NativeBackend
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="wallpaper-studio-video",description="Native GNOME wallpapers and editable desktop themes")
     commands=parser.add_subparsers(dest="command")
-    opened=commands.add_parser("open");opened.add_argument("--page",choices=["library","appearance","widgets","desktop","session","history","preferences","video"],default="library")
+    opened=commands.add_parser("open");opened.add_argument("--page",choices=["library","appearance","widgets","dock","desktop","session","history","preferences","video"],default="library")
     widget=commands.add_parser('widgets');widget.add_argument('action',nargs='?',choices=['run','show','hide','edit','lock','stop'],default='show')
     change=commands.add_parser("set");change.add_argument("file");change.add_argument("--target",choices=["both","light","dark"])
     change.add_argument("--fit",choices=sorted(NativeBackend.FITS));change.add_argument("--no-theme",action="store_true")
     change.add_argument("--still",action="store_true",help="use a still frame even when the file is a video")
+    dock=commands.add_parser("dock");dock.add_argument("action",nargs="?",choices=["start","stop","status"],default="status")
     video=commands.add_parser("video");video.add_argument("action",nargs="?",choices=["set","start","stop","status"],default="status")
     video.add_argument("file",nargs="?");video.add_argument("--fit",choices=["cover","contain"])
     video.add_argument("--monitor",type=int)
@@ -34,6 +35,12 @@ def main(argv=None):
     if args.command=="session":
         from .session import main as session_main
         return session_main()
+    if args.command=="dock":
+        from . import dock
+        if args.action=="start": print(json.dumps(dock.start(),indent=2))
+        elif args.action=="stop": print(json.dumps({"stopped":dock.stop()},indent=2))
+        else: print(json.dumps(dock.status(),indent=2))
+        return 0
     if args.command=='widgets' and args.action=='run':
         try:
             from .widgets import main as widgets_main

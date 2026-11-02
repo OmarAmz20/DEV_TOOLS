@@ -107,6 +107,31 @@ Widgets follow the last applied theme. Draft colour edits do not alter the runni
 
 **Export layout** shares positions and widget options without the sticky note. **Import layout** loads a preview, preserves your note, and does not automatically enable widgets. The timer runs while the widget host is running and resets when that host exits. No weather service, account or internet access is needed for the local widgets.
 
+## Dock
+
+Open **Dock** to run a dock that belongs to this app rather than the GNOME
+Shell extension. It is a separate GTK process with a native layer-shell surface
+on wlroots/Hyprland and a normal-window fallback elsewhere.
+
+- Start, stop and re-apply from the page, or use:
+  `wallpaper-studio-video dock start`, `dock stop`, `dock status`.
+- Put it on the **bottom, top, left or right** edge.
+- Choose a monitor or show it on all monitors.
+- Change alignment, icon size, spacing, edge padding, corner radius, opacity,
+  accent colour and one of six skins.
+- Show or hide app labels.
+- Reserve screen space so maximized windows do not sit under the dock.
+- Add installed desktop applications or custom commands.
+- Add separators to group apps, then reorder or remove any entry.
+- Reorder apps with the arrow buttons, edit their labels/icons/commands, or
+  remove them.
+- Toggle **Start at login** to create a per-user autostart entry.
+- The live preview updates while you change settings; **Apply dock** commits and
+  starts it.
+
+The dock launches desktop files through `Gio.DesktopAppInfo` and custom
+commands through `/bin/sh`. It does not collect or send anything.
+
 ## Desktop controls
 
 The **Desktop controls** page can edit:

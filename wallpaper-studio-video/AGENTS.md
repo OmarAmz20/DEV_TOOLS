@@ -26,6 +26,15 @@ in `wallpaper_studio/core.py` and `video_wallpaper.py` via
 `WALLPAPER_STUDIO_GOINFRE` / `WALLPAPER_STUDIO_CACHE_DIR`.  Never hard-code a
 user's home path.
 
+## Dock
+
+- `wallpaper_studio/dock.py` — config, app entries, styling, process manager.
+- `wallpaper_studio/dock_daemon.py` — GTK4/layer-shell dock host.
+- `wallpaper_studio/dock_page.py` — Dock page and app editor.
+- Dock config lives beside the studio config as `dock.json`; state/PID are
+  managed inside `core.CONFIG_DIR`/runtime cache. Do not enable it automatically
+  without the user's page toggle.
+
 ## Video wallpaper
 
 - `video_wallpaper.py` — state, process control, extension helpers.

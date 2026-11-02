@@ -43,6 +43,7 @@ def install(source,launch=False,no_runtime=False):
     # Stop only this app's helper through its own verified PID path.
     if launcher.is_file():
         subprocess.run([str(launcher),"video","stop"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
+        subprocess.run([str(launcher),"dock","stop"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
         subprocess.run([str(launcher),"stop"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
     helper_lock=Path(os.environ.get('XDG_RUNTIME_DIR',tempfile.gettempdir()))/f'wallpaper-studio-video-{os.getuid()}.lock'
     if helper_lock.exists():

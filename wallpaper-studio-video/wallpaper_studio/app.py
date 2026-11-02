@@ -11,6 +11,7 @@ from gi.repository import Adw,Gdk,GdkPixbuf,Gio,GLib,Gtk,Pango
 from . import core,recipes,skins,assets,widget_control
 from . import video_wallpaper as video
 from .custom_pages import CustomizationPages
+from .dock_page import DockPage
 from .backend import NativeBackend
 
 APP_ID=core.APP_ID
@@ -110,7 +111,7 @@ class CoverPicture(Gtk.DrawingArea):
 from .session_page import SessionPage
 
 
-class Window(Adw.ApplicationWindow,CustomizationPages,SessionPage):
+class Window(Adw.ApplicationWindow,CustomizationPages,DockPage,SessionPage):
     def __init__(self,app,page="library"):
         super().__init__(application=app,title="Wallpaper Studio Video",default_width=1160,default_height=880)
         self.add_css_class("studio-plus")
@@ -139,6 +140,7 @@ class Window(Adw.ApplicationWindow,CustomizationPages,SessionPage):
         self.stack.add_named(self.scroll(self.library_page()),"library")
         self.stack.add_named(self.scroll(self.appearance_page()),"appearance")
         self.stack.add_named(self.scroll(self.widgets_page()),"widgets")
+        self.stack.add_named(self.scroll(self.dock_page()),"dock")
         self.stack.add_named(self.scroll(self.video_page()),"video")
         self.stack.add_named(self.scroll(self.desktop_page()),"desktop")
         self.stack.add_named(self.scroll(self.session_page()),"session")
@@ -173,7 +175,8 @@ class Window(Adw.ApplicationWindow,CustomizationPages,SessionPage):
         brand.append(label("Wallpaper & colour","dim-label"));box.append(brand)
         self.nav=Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE);self.nav.add_css_class("studio-nav")
         for key,title,icon in (("library","Library","view-grid-symbolic"),("appearance","Appearance","applications-graphics-symbolic"),
-                               ("widgets","Widgets","view-app-grid-symbolic"),("video","Video wallpaper","media-playback-start-symbolic"),
+                               ("widgets","Widgets","view-app-grid-symbolic"),("dock","Dock","view-list-symbolic"),
+                               ("video","Video wallpaper","media-playback-start-symbolic"),
                                ("desktop","Desktop controls","preferences-desktop-display-symbolic"),
                                ("session","Session","system-lock-screen-symbolic"),("history","Recent choices","document-open-recent-symbolic"),("preferences","Preferences","preferences-system-symbolic")):
             row=Gtk.ListBoxRow();row.page_name=key
@@ -201,9 +204,10 @@ class Window(Adw.ApplicationWindow,CustomizationPages,SessionPage):
 
     def set_page(self,name):
         if hasattr(self,"stack") and self.stack.get_child_by_name(name):self.stack.set_visible_child_name(name)
-        for i in range(8):
+        for i in range(self.nav.get_n_rows() if hasattr(self.nav,"get_n_rows") else 16):
             row=self.nav.get_row_at_index(i)
-            if row and row.page_name==name and self.nav.get_selected_row()!=row:self.nav.select_row(row)
+            if row is None:break
+            if row.page_name==name and self.nav.get_selected_row()!=row:self.nav.select_row(row)
         if name=="history" and hasattr(self,"history_group"):self.load_history()
         if name=="video" and hasattr(self,"video_status_label"):self.refresh_video_status()
 
@@ -825,6 +829,12 @@ class App(Adw.Application):
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(),self.preview_css,Gtk.STYLE_PROVIDER_PRIORITY_USER+1)
         action=Gio.SimpleAction.new("quit",None);action.connect("activate",lambda *_:self.quit());self.add_action(action)
         core.start()
+        try:
+            from . import dock
+            if dock.load().get("enabled") and not dock.running():
+                threading.Thread(target=dock.start, daemon=True).start()
+        except (ImportError, OSError, RuntimeError):
+            pass
         if widget_control.load()['enabled']:
             def resume():
                 try:widget_control.start()

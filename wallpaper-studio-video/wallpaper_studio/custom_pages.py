@@ -263,7 +263,7 @@ class CustomizationPages:
         fonts=Adw.PreferencesGroup(title='Fonts, icons and cursors')
         windows=Adw.PreferencesGroup(title='Windows and motion')
         panel=Adw.PreferencesGroup(title='Top bar and workspaces')
-        dock=Adw.PreferencesGroup(title='Dock',description='Controls the installed Ubuntu Dock or Dash to Dock extension.')
+        dock=Adw.PreferencesGroup(title='GNOME Dock extension',description='Controls the installed Ubuntu Dock or Dash to Dock extension. Use the separate Dock page for the app-owned dock.')
         choices={'icons':desktop.themes(),'cursor':desktop.themes(True),'buttons':[':minimize,maximize,close','close,minimize,maximize:',':close'],'focus':['click','sloppy','mouse'],'dock_position':['BOTTOM','LEFT','RIGHT','TOP']}
         titles={'font':'Interface font','mono':'Monospace font','icons':'Icon pack','cursor':'Cursor pack','cursor_size':'Cursor size','text_scale':'Text scale','animations':'Window animations','buttons':'Titlebar buttons','focus':'Focus behaviour','center':'Centre new windows','clock_seconds':'Clock seconds','clock_date':'Clock date','clock_weekday':'Clock weekday','hot_corner':'Activities hot corner','battery':'Battery percentage','dynamic_workspaces':'Dynamic workspaces','workspaces':'Workspace count','dock_position':'Dock position','dock_size':'Dock icon size','dock_autohide':'Dock auto-hide','dock_extend':'Extend dock along screen edge'}
         for name,spec in available.items():
@@ -288,7 +288,7 @@ class CustomizationPages:
             group.add(row)
         for group in (fonts,windows,panel):page.append(group)
         if any(name.startswith('dock_') for name in available):page.append(dock)
-        else:page.append(text('Dock controls appear when Ubuntu Dock or Dash to Dock is installed.', 'dim-label',wrap=True))
+        else:page.append(text('GNOME dock controls appear when Ubuntu Dock or Dash to Dock is installed. The app-owned dock is on the Dock page.', 'dim-label',wrap=True))
         page.append(action('Restore desktop controls',lambda:self.run(desktop.restore_all,'Original desktop controls restored')))
         page.append(text('GTK apps can adopt the full window design. Apps that draw their own interfaces and sandboxed apps may keep their own controls.', 'caption',wrap=True))
         return page
