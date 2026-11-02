@@ -1,0 +1,7 @@
+{
+  "uuid": "wallpaper-studio-video@local",
+  "name": "Wallpaper Studio Video",
+  "description": "Show a looping video behind the GNOME desktop and desktop icons.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "version": 1
+}

@@ -1,0 +1,21 @@
+{
+  "format": "wallpaper-studio-video-theme",
+  "version": 1,
+  "name": "Pixel Coffee",
+  "settings": {
+    "preset": "custom",
+    "custom_name": "Pixel Coffee",
+    "mode": "dark",
+    "skin": "pixel",
+    "pixel_font": true,
+    "theme_extras": true,
+    "custom_dark": {
+      "paper": "#24201C",
+      "paper2": "#191613",
+      "sheet": "#37302A",
+      "ink": "#F1E6D6",
+      "muted": "#C8BBA8",
+      "accent": "#D9B17D"
+    }
+  }
+}

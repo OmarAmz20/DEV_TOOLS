@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-*.pyo
-.pixi/
-.build/
-engine/.build/
-*.log
-.pytest_cache/

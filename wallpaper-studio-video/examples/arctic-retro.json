@@ -1,0 +1,14 @@
+{
+  "format": "wallpaper-studio-video-theme",
+  "version": 1,
+  "name": "Arctic Retro",
+  "settings": {
+    "preset": "nord",
+    "custom_name": "Arctic Retro",
+    "mode": "dark",
+    "skin": "classic",
+    "pixel_font": true,
+    "theme_extras": true,
+    "custom_dark": {}
+  }
+}

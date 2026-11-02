@@ -1,0 +1,38 @@
+[workspace]
+name = "wallpaper-studio-video"
+version = "2.2.0"
+description = "Native GNOME wallpapers, themes, widgets and a video wallpaper engine"
+authors = ["Wallpaper Studio Video contributors"]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+# Development/test environment.  The Ubuntu installer uses the system Python
+# and GTK so the app integrates with the host desktop and the user-local GTK
+# runtime.  Add Python packages here for development and tests.
+[dependencies]
+python = "3.12.*"
+pygobject = ">=3.50,<4"
+gtk4 = ">=4.14"
+gtk3 = ">=3.24"
+libadwaita = ">=1.6"
+gdk-pixbuf = ">=2.42"
+gsettings-desktop-schemas = "*"
+adwaita-icon-theme = "*"
+pillow = ">=10.0"
+pycairo = ">=1.26"
+gstreamer = ">=1.22"
+gst-plugins-base = ">=1.22"
+gst-plugins-good = ">=1.22"
+gst-plugins-bad = ">=1.22"
+gst-libav = ">=1.22"
+flake8 = ">=7"
+
+[tasks]
+run = "python -m wallpaper_studio"
+test = "python -m unittest discover -s tests -v"
+compile = "python -m compileall -q wallpaper_studio"
+lint = "python -m flake8 wallpaper_studio --select=F821,F811,E9 --max-line-length=140"
+build-run = "python packaging/build_bundle.py dist/Wallpaper-Studio-Video.run"
+
+[activation]
+scripts = ["scripts/activate.sh"]

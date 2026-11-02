@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Launch from an extracted download or an installed user directory."""
+import os
+import runpy
+import sys
+sys.path.insert(0,os.path.dirname(os.path.realpath(__file__)))
+runpy.run_module("wallpaper_studio",run_name="__main__")
