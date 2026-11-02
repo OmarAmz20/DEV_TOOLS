@@ -1,0 +1,540 @@
+@define-color accent_bg_color #7c5cff;
+@define-color accent_color #a78bfa;
+@define-color accent_fg_color #ffffff;
+
+/* 1337-Customizer — application chrome.
+   Uses libadwaita's named colours so it follows the user's light/dark mode. */
+
+.leet-window {
+  background-color: @window_bg_color;
+}
+
+.leet-sidebar {
+  background:
+    linear-gradient(180deg, alpha(@accent_bg_color, 0.14), transparent 46%),
+    @sidebar_bg_color;
+  border-right: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.brand-box {
+  padding: 18px 16px 10px 18px;
+}
+
+.logo-tile {
+  min-width: 38px;
+  min-height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #7c5cff, #19c6d8 60%, #ff9ecb);
+  box-shadow: 0 5px 18px alpha(#7c5cff, 0.38);
+}
+
+.brand-title {
+  font-size: 15pt;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  color: @window_fg_color;
+}
+
+.brand-sub {
+  font-size: 8.5pt;
+  color: alpha(@window_fg_color, 0.58);
+  letter-spacing: 0.3px;
+}
+
+.sidebar-nav {
+  padding: 6px 10px;
+}
+
+.nav-item {
+  border-radius: 10px;
+  padding: 7px 10px;
+  color: alpha(@window_fg_color, 0.72);
+  font-weight: 550;
+}
+
+.nav-item:hover {
+  background-color: alpha(@window_fg_color, 0.07);
+  color: @window_fg_color;
+}
+
+.nav-item.active {
+  background-color: alpha(@accent_bg_color, 0.20);
+  color: @window_fg_color;
+}
+
+.nav-icon {
+  color: alpha(@accent_bg_color, 0.92);
+}
+
+.sidebar-footer {
+  padding: 10px 14px 16px 14px;
+}
+
+.sidebar-status {
+  font-size: 8.5pt;
+  color: alpha(@window_fg_color, 0.52);
+}
+
+.content-area {
+  background-color: @window_bg_color;
+}
+
+.page-scroll {
+  background-color: transparent;
+}
+
+.page-header {
+  padding: 24px 28px 10px 28px;
+}
+
+.page-title {
+  font-size: 27pt;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  color: @window_fg_color;
+}
+
+.page-subtitle {
+  font-size: 10pt;
+  color: alpha(@window_fg_color, 0.58);
+  margin-top: -2px;
+}
+
+.section-title {
+  font-size: 12pt;
+  font-weight: 750;
+  letter-spacing: -0.25px;
+}
+
+.section-subtitle {
+  font-size: 9pt;
+  color: alpha(@window_fg_color, 0.55);
+}
+
+.hero-card {
+  border-radius: 18px;
+  padding: 18px 20px;
+  background:
+    radial-gradient(circle at 14% 0%, alpha(@accent_bg_color, 0.30), transparent 55%),
+    linear-gradient(135deg, alpha(@accent_bg_color, 0.12), alpha(@window_fg_color, 0.035));
+  border: 1px solid alpha(@window_fg_color, 0.09);
+}
+
+.hero-title {
+  font-size: 17pt;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+}
+
+.hero-subtitle {
+  font-size: 9.5pt;
+  color: alpha(@window_fg_color, 0.60);
+}
+
+.glass-panel {
+  border-radius: 16px;
+  padding: 14px;
+  background-color: alpha(@window_fg_color, 0.045);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.stat-card {
+  border-radius: 14px;
+  padding: 13px 15px;
+  background-color: alpha(@window_fg_color, 0.045);
+  border: 1px solid alpha(@window_fg_color, 0.075);
+}
+
+.stat-value {
+  font-size: 19pt;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+
+.stat-label {
+  font-size: 8.5pt;
+  color: alpha(@window_fg_color, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.toolbar-row {
+  padding: 4px 28px 10px 28px;
+}
+
+.search-entry {
+  border-radius: 11px;
+  min-height: 30px;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 4px 11px;
+  background-color: alpha(@window_fg_color, 0.06);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+  font-size: 9pt;
+  font-weight: 600;
+}
+
+.pill.active {
+  background-color: alpha(@accent_bg_color, 0.22);
+  border-color: alpha(@accent_bg_color, 0.42);
+  color: @window_fg_color;
+}
+
+.kind-badge {
+  border-radius: 7px;
+  padding: 2px 7px;
+  background-color: alpha(#0b0b10, 0.72);
+  color: #ffffff;
+  font-size: 8pt;
+  font-weight: 700;
+}
+
+.favorite-star {
+  color: #f2c14e;
+}
+
+.thumb-card {
+  border-radius: 12px;
+  padding: 5px;
+  background-color: alpha(@window_fg_color, 0.045);
+  border: 1px solid alpha(@window_fg_color, 0.07);
+  transition: 140ms ease;
+}
+
+.thumb-card:hover {
+  background-color: alpha(@window_fg_color, 0.09);
+  border-color: alpha(@accent_bg_color, 0.38);
+}
+
+.thumb-card.selected {
+  background-color: alpha(@accent_bg_color, 0.18);
+  border-color: alpha(@accent_bg_color, 0.72);
+  box-shadow: 0 0 0 1px alpha(@accent_bg_color, 0.20);
+}
+
+.thumb-picture {
+  border-radius: 8px;
+  background-color: alpha(#000000, 0.35);
+}
+
+.thumb-name {
+  font-size: 8.5pt;
+  font-weight: 650;
+  color: @window_fg_color;
+}
+
+.thumb-meta {
+  font-size: 7.6pt;
+  color: alpha(@window_fg_color, 0.50);
+}
+
+.preview-panel {
+  border-radius: 16px;
+  padding: 12px;
+  background-color: alpha(@window_fg_color, 0.04);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.preview-image {
+  border-radius: 10px;
+  background-color: alpha(#000000, 0.4);
+  min-height: 190px;
+}
+
+.preview-title {
+  font-size: 14pt;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+}
+
+.meta-key {
+  font-size: 8.2pt;
+  color: alpha(@window_fg_color, 0.48);
+}
+
+.meta-value {
+  font-size: 8.8pt;
+  font-weight: 600;
+}
+
+.history-row {
+  border-radius: 8px;
+  padding: 5px 7px;
+}
+
+.history-row:hover {
+  background-color: alpha(@window_fg_color, 0.06);
+}
+
+.theme-grid {
+  padding: 2px;
+}
+
+.theme-card {
+  border-radius: 13px;
+  padding: 10px;
+  min-width: 150px;
+  min-height: 86px;
+  border: 2px solid transparent;
+  background-color: alpha(@window_fg_color, 0.055);
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.theme-card:hover {
+  border-color: alpha(@window_fg_color, 0.20);
+}
+
+.theme-card.selected {
+  border-color: @accent_bg_color;
+  box-shadow: 0 0 0 1px alpha(@accent_bg_color, 0.22);
+}
+
+.theme-name {
+  font-size: 10pt;
+  font-weight: 780;
+  color: #ffffff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+}
+
+.theme-description {
+  font-size: 8pt;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+}
+
+.swatch-row {
+  padding: 0;
+}
+
+.swatch {
+  min-width: 15px;
+  min-height: 15px;
+  border-radius: 999px;
+  border: 1px solid alpha(#000000, 0.20);
+}
+
+.preview-canvas {
+  border-radius: 15px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 20% 10%, alpha(@accent_bg_color, 0.16), transparent 55%),
+    alpha(@window_fg_color, 0.045);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.widget-canvas {
+  border-radius: 14px;
+  background-color: alpha(#000000, 0.22);
+  border: 1px solid alpha(@window_fg_color, 0.10);
+}
+
+.widget-canvas-label {
+  font-size: 7.8pt;
+  color: alpha(@window_fg_color, 0.50);
+}
+
+.font-card {
+  border-radius: 11px;
+  padding: 10px 12px;
+  background-color: alpha(@window_fg_color, 0.045);
+  border: 1px solid alpha(@window_fg_color, 0.07);
+}
+
+.font-card:hover {
+  background-color: alpha(@window_fg_color, 0.08);
+}
+
+.font-sample {
+  font-size: 15pt;
+  font-weight: 500;
+}
+
+.font-name {
+  font-size: 9pt;
+  font-weight: 700;
+}
+
+.status-bar {
+  padding: 6px 28px;
+  background-color: alpha(@window_fg_color, 0.025);
+  border-top: 1px solid alpha(@window_fg_color, 0.07);
+  font-size: 8.5pt;
+  color: alpha(@window_fg_color, 0.55);
+}
+
+.empty-state {
+  padding: 42px;
+  border-radius: 18px;
+  border: 1px dashed alpha(@window_fg_color, 0.18);
+  background-color: alpha(@window_fg_color, 0.025);
+}
+
+.empty-title {
+  font-size: 14pt;
+  font-weight: 750;
+}
+
+.empty-subtitle {
+  font-size: 9pt;
+  color: alpha(@window_fg_color, 0.55);
+}
+
+.badge-accent {
+  border-radius: 999px;
+  padding: 3px 9px;
+  background-color: alpha(@accent_bg_color, 0.18);
+  color: @accent_bg_color;
+  font-size: 8pt;
+  font-weight: 750;
+}
+
+.badge-warn {
+  border-radius: 999px;
+  padding: 3px 9px;
+  background-color: alpha(#e5a50a, 0.16);
+  color: #e5a50a;
+  font-size: 8pt;
+  font-weight: 750;
+}
+
+.badge-ok {
+  border-radius: 999px;
+  padding: 3px 9px;
+  background-color: alpha(#33d17a, 0.15);
+  color: #33d17a;
+  font-size: 8pt;
+  font-weight: 750;
+}
+
+.setting-row {
+  border-radius: 12px;
+  padding: 12px 14px;
+  background-color: alpha(@window_fg_color, 0.04);
+  border: 1px solid alpha(@window_fg_color, 0.07);
+}
+
+.setting-title {
+  font-size: 10pt;
+  font-weight: 700;
+}
+
+.setting-subtitle {
+  font-size: 8.7pt;
+  color: alpha(@window_fg_color, 0.55);
+}
+
+.monitor-frame {
+  border-radius: 12px;
+  background-color: alpha(#000000, 0.28);
+  border: 1px solid alpha(@window_fg_color, 0.18);
+}
+
+.widget-chip {
+  border-radius: 7px;
+  background-color: alpha(@accent_bg_color, 0.20);
+  border: 1px solid alpha(@accent_bg_color, 0.60);
+  color: @window_fg_color;
+  font-size: 8pt;
+  font-weight: 650;
+}
+
+.widget-chip.selected {
+  background-color: alpha(@accent_bg_color, 0.48);
+  border-color: @accent_bg_color;
+}
+
+.font-preview-window {
+  border-radius: 14px;
+  background-color: alpha(@window_fg_color, 0.04);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+  padding: 16px;
+}
+
+.command-box {
+  font-family: monospace;
+  font-size: 9pt;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background-color: alpha(#000000, 0.26);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.sidebar-separator {
+  background-color: alpha(@window_fg_color, 0.08);
+  min-height: 1px;
+  margin: 7px 14px;
+}
+
+.toast {
+  background-color: alpha(@window_fg_color, 0.94);
+  color: @window_bg_color;
+}
+
+.leet-sidebar .sidebar-nav row {
+  background-color: transparent;
+  border-radius: 10px;
+}
+
+.leet-sidebar .sidebar-nav row:hover {
+  background-color: alpha(@window_fg_color, 0.06);
+}
+
+.leet-sidebar .sidebar-nav row:selected {
+  background-color: transparent;
+}
+
+.leet-sidebar .sidebar-nav row:selected .nav-item.active,
+.leet-sidebar .nav-item.active {
+  background-color: alpha(@accent_bg_color, 0.24);
+  border: 1px solid alpha(@accent_bg_color, 0.30);
+  color: @window_fg_color;
+}
+
+/* Brand accents independent of the host GTK theme. */
+button.suggested-action {
+  background-image: linear-gradient(135deg, #6f5bff, #16b8c9);
+  background-color: #6f5bff;
+  border-color: #8577ff;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+button.suggested-action:hover {
+  background-image: linear-gradient(135deg, #7e6cff, #25c9da);
+  border-color: #a69aff;
+}
+
+switch:checked {
+  background-color: #6f5bff;
+  border-color: #8b7dff;
+}
+
+switch:checked slider {
+  background-color: #ffffff;
+}
+
+.leet-sidebar .nav-item.active {
+  background-image: linear-gradient(135deg, rgba(111, 91, 255, 0.42), rgba(22, 184, 201, 0.18));
+  background-color: rgba(111, 91, 255, 0.30);
+  border: 1px solid rgba(139, 125, 255, 0.55);
+  color: #ffffff;
+}
+
+.theme-card.selected {
+  border-color: #7c6cff;
+}
+
+.hp-button.primary {
+  background-image: linear-gradient(135deg, #6f5bff, #16b8c9);
+  background-color: #6f5bff;
+  border-color: #8577ff;
+}
+
+.thumb-card.selected {
+  background-color: rgba(111, 91, 255, 0.20);
+  border-color: rgba(139, 125, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(139, 125, 255, 0.28);
+}

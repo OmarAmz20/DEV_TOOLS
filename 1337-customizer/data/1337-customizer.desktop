@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=1337-Customizer
+GenericName=Wallpaper & Desktop Studio
+Comment=Wallpapers, themes, fonts, widgets and video wallpapers
+Exec=1337-customizer
+Icon=1337-customizer
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=wallpaper;theme;widgets;font;video;desktop;hyprland;gnome;
+StartupNotify=true
+StartupWMClass=io.github.LeetCustomizer
+Actions=Wallpapers;Widgets;
+
+[Desktop Action Wallpapers]
+Name=Open wallpapers
+Exec=1337-customizer
+
+[Desktop Action Widgets]
+Name=Edit desktop widgets
+Exec=1337-customizer widgets edit

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# 1337-Customizer launcher.  Keeps the checkout relocatable and sets up the
+# GI typelib path used by gtk4-layer-shell on some distributions.
+set -euo pipefail
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${LEET_PYTHON:-python3}"
+
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+for candidate in \
+  /usr/lib/girepository-1.0 \
+  /usr/lib64/girepository-1.0 \
+  /usr/lib/x86_64-linux-gnu/girepository-1.0 \
+  /usr/local/lib/girepository-1.0; do
+  if [ -d "$candidate" ]; then
+    case ":${GI_TYPELIB_PATH:-}:" in
+      *":$candidate:"*) ;;
+      *) export GI_TYPELIB_PATH="${GI_TYPELIB_PATH:+$GI_TYPELIB_PATH:}$candidate" ;;
+    esac
+  fi
+done
+
+exec "$PYTHON" -m leet_customizer "$@"
