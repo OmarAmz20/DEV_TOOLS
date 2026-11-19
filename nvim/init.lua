@@ -28,6 +28,12 @@ vim.opt.termguicolors = true
 vim.g.mapleader = " "
 vim.opt.clipboard:append("unnamedplus")
 
+-- This config is pure Lua; the optional remote-plugin providers are unused.
+vim.g.loaded_python3_provider = 0
+vim.g.loaded_node_provider = 0
+vim.g.loaded_perl_provider = 0
+vim.g.loaded_ruby_provider = 0
+
 require("lazy").setup({
   { import = "plugins" },
 
@@ -68,7 +74,7 @@ require("lazy").setup({
     dependencies = { "nvim-tree/nvim-web-devicons" },
     config = function()
       require("nvim-tree").setup({})
-      vim.keymap.set("n", "<leader>e", ":NvimTreeToggle<CR>")
+      vim.keymap.set("n", "<leader>e", "<cmd>NvimTreeToggle<CR>", { desc = "Toggle file explorer" })
     end,
   },
 
@@ -78,12 +84,13 @@ require("lazy").setup({
     dependencies = { "nvim-lua/plenary.nvim" },
     config = function()
       local builtin = require("telescope.builtin")
-      vim.keymap.set("n", "<leader>ff", builtin.find_files, {})
-      vim.keymap.set("n", "<leader>fg", builtin.live_grep, {})
-      vim.keymap.set("n", "<leader>fb", builtin.buffers, {})
+      vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Find files" })
+      vim.keymap.set("n", "<leader>fg", builtin.live_grep, { desc = "Live grep" })
+      vim.keymap.set("n", "<leader>fb", builtin.buffers, { desc = "Buffers" })
+      vim.keymap.set("n", "<leader>fh", builtin.help_tags, { desc = "Help tags" })
       vim.keymap.set("n", "<leader>t", function()
         vim.cmd("botright vsplit | term")
-      end, {})
+      end, { desc = "Open terminal" })
     end,
   },
 
@@ -101,16 +108,25 @@ require("lazy").setup({
     name = "render-markdown",
   },
 
-  -- Treesitter
+  -- Treesitter (main branch, required for Neovim 0.12+)
   {
     "nvim-treesitter/nvim-treesitter",
-    branch = "master",
+    branch = "main",
+    lazy = false,
     build = ":TSUpdate",
     config = function()
-      require("nvim-treesitter.configs").setup({
-        ensure_installed = { "markdown", "markdown_inline", "html", "yaml" },
-        auto_install = true,
-        highlight = { enable = true },
+      local ts = require("nvim-treesitter")
+      ts.setup()
+      ts.install({
+        "markdown",
+        "markdown_inline",
+        "html",
+        "yaml",
+        "lua",
+        "python",
+        "json",
+        "make",
+        "gitignore",
       })
     end,
   },
@@ -124,16 +140,28 @@ require("lazy").setup({
     },
     config = function()
       local null_ls = require("null-ls")
-      null_ls.setup({
-        sources = {
-          require("none-ls.diagnostics.flake8"),
-        },
-      })
+      local sources = {}
+
+      -- Only register flake8 when it is actually installed, otherwise
+      -- none-ls logs a warning on every run.
+      if vim.fn.executable("flake8") == 1 then
+        sources[#sources + 1] = require("none-ls.diagnostics.flake8")
+      end
+
+      null_ls.setup({ sources = sources })
     end,
   },
 }, {
   -- No plugin needs luarocks; don't report it as a health error.
   rocks = { enabled = false },
+})
+
+-- nvim-treesitter's main branch does not enable highlighting automatically.
+vim.api.nvim_create_autocmd("FileType", {
+  callback = function(args)
+    pcall(vim.treesitter.start, args.buf)
+  end,
+  desc = "Enable Tree-sitter highlighting",
 })
 
 -- Black metal theme: pure black, bone white, dusty red.
@@ -160,11 +188,23 @@ if ok_devicons then
 end
 
 -- Open PDFs with zathura (xdg-open fallback)
-local pdf_viewer = vim.fn.executable("zathura") == 1 and "zathura" or "xdg-open"
+local pdf_viewer
+for _, candidate in ipairs({ "zathura", "xdg-open" }) do
+  if vim.fn.executable(candidate) == 1 then
+    pdf_viewer = candidate
+    break
+  end
+end
+
 vim.api.nvim_create_autocmd("BufReadCmd", {
   pattern = { "*.pdf" },
   callback = function()
-    vim.fn.jobstart({ pdf_viewer, vim.fn.expand("%:p") }, { detach = true })
-    vim.cmd("bw")
+    local path = vim.fn.expand("%:p")
+    if not pdf_viewer then
+      vim.notify("No PDF viewer found (install zathura or xdg-open)", vim.log.levels.WARN)
+    elseif vim.fn.jobstart({ pdf_viewer, path }, { detach = true }) <= 0 then
+      vim.notify(("Failed to launch %s for %s"):format(pdf_viewer, path), vim.log.levels.WARN)
+    end
+    vim.cmd("bwipeout!")
   end,
 })

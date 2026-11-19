@@ -1,12 +1,16 @@
 return {
   {
     "goolord/alpha-nvim",
-    event = "VimEnter",
     dependencies = { "nvim-tree/nvim-web-devicons" },
     config = function()
       -- Only show the home screen for plain `nvim`, not `nvim file.py`.
-      if vim.fn.argc() > 0 or vim.fn.line2byte('$') ~= -1
-          and vim.api.nvim_buf_get_lines(0, 0, -1, false)[1] ~= '' then
+      if vim.fn.argc() > 0 then
+        return
+      end
+
+      local buf = vim.api.nvim_get_current_buf()
+      local first_line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or ""
+      if vim.api.nvim_buf_get_name(buf) ~= "" or first_line ~= "" then
         return
       end
       local alpha = require("alpha")
@@ -33,9 +37,20 @@ return {
       dashboard.section.header.opts.hl = "IzmiraldaLogo"
       dashboard.section.buttons.opts.hl = "IzmiraldaMenu"
       dashboard.section.footer.opts.hl = "IzmiraldaFooter"
-      vim.api.nvim_set_hl(0, "IzmiraldaLogo", { fg = "#b8b8b8", bold = true })
-      vim.api.nvim_set_hl(0, "IzmiraldaMenu", { fg = "#e0e0e0" })
-      vim.api.nvim_set_hl(0, "IzmiraldaFooter", { fg = "#a75c5c", italic = true })
+
+      -- Re-apply on every colorscheme change, otherwise loading a theme after
+      -- this config wipes these groups.
+      local function set_dashboard_highlights()
+        vim.api.nvim_set_hl(0, "IzmiraldaLogo", { fg = "#b8b8b8", bold = true })
+        vim.api.nvim_set_hl(0, "IzmiraldaMenu", { fg = "#e0e0e0" })
+        vim.api.nvim_set_hl(0, "IzmiraldaFooter", { fg = "#a75c5c", italic = true })
+      end
+
+      set_dashboard_highlights()
+      vim.api.nvim_create_autocmd("ColorScheme", {
+        callback = set_dashboard_highlights,
+        desc = "Restore dashboard highlights",
+      })
       dashboard.config.layout = {
         { type = "padding", val = 3 },
         dashboard.section.header,
